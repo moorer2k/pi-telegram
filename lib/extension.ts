@@ -3113,8 +3113,8 @@ export default function (pi: Pi.ExtensionAPI) {
       liveTailConsumer?.onFinalDelivered(turn.chatId, turn.replyToMessageId);
     },
     onSessionStarted(_event, ctx) {
-      disposeLiveTail?.();
-      disposeLiveTail = (configControls.getLiveTailSettings().enabled === true || process.env.PI_TELEGRAM_LIVE_TAIL === "1") ? registerLiveTailConsumer() : undefined;
+      liveTailConsumer?.dispose();
+      liveTailConsumer = registerLiveTailConsumer(() => ({ ...configControls.getLiveTailSettings(), enabled: configControls.getLiveTailSettings().enabled === true || process.env.PI_TELEGRAM_LIVE_TAIL === "1" }));
       sessionActionAssembly.settlement.onSessionStart(ctx);
     },
     buttonActionStore,
