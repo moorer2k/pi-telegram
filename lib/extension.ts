@@ -997,7 +997,7 @@ export default function (pi: Pi.ExtensionAPI) {
     getMessageText: Replies.getAgentMessageText,
     getDefaultReplyToMessageId: activeTurnRuntime.getReplyToMessageId,
     sendDraft: nativeMarkdownDraftSender,
-    canSend: configControls.areDraftPreviewsEnabled,
+    canSend: () => !configControls.getLiveTailSettings().enabled && process.env.PI_TELEGRAM_LIVE_TAIL !== "1" && configControls.areDraftPreviewsEnabled(),
     sendMarkdownReply,
     recordRuntimeEvent,
     ...replyTransport,
