@@ -463,8 +463,20 @@ export async function handleTelegramMenuCallbackRuntime<
               throw new Error("Rich Message delivery is unavailable");
             }),
           enqueuePrompt: deps.enqueueSectionPrompt
-            ? (prompt: string) =>
-                deps.enqueueSectionPrompt!(prompt, ctx, target, query)
+            ? async (prompt: string) => {
+                await deps.enqueueSectionPrompt!(prompt, ctx, target, query);
+                // The queued task gets its own response; retire the menu keyboard.
+                // Never mark a task completed merely because it was queued.
+                const summary = prompt.trim().replace(/\\s+/g, " ").slice(0, 180);
+                const safe = summary.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                await deps.editInteractiveMessage?.(
+                  chatId,
+                  messageId,
+                  "<b>Task queued</b>\\n" + safe,
+                  "html",
+                  { inline_keyboard: [] },
+                );
+              }
             : async () => {},
           deleteMessage: deps.deleteMessage ?? (async () => {}),
         };
