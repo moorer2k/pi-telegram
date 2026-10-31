@@ -1,66 +1,64 @@
 /**
- * Opt-in self-update for a locally managed Pi Telegram checkout.
- * No shell, user-supplied commands, or implicit restart authority.
+ * Telegram extension updater using the existing Pi-Bolt systemd restart configuration.
+ * Mirrors VENOM maintenance: installed checkout, clean tree, fast-forward, configured scope.
  */
 import { spawn } from "node:child_process";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const EXPECTED_ORIGIN = /^(?:https:\/\/github\.com\/moorer2k\/pi-telegram(?:\.git)?|git@github\.com:moorer2k\/pi-telegram(?:\.git)?)$/i;
+const UNIT_RE = /^[a-zA-Z0-9_.@-]+\.service$/;
+let updating = false;
 
 function run(command: string, args: string[], cwd: string, timeoutMs = 120000): Promise<string> {
-  return new Promise((resolveResult, reject) => {
+  return new Promise((done, fail) => {
     const child = spawn(command, args, { cwd, shell: false, stdio: ["ignore", "pipe", "pipe"] });
     let output = "";
-    const timeout = setTimeout(() => child.kill("SIGTERM"), timeoutMs);
-    child.stdout.on("data", chunk => { output = (output + String(chunk)).slice(-4000); });
-    child.stderr.on("data", chunk => { output = (output + String(chunk)).slice(-4000); });
-    child.on("error", error => { clearTimeout(timeout); reject(error); });
-    child.on("close", code => {
-      clearTimeout(timeout);
-      code === 0 ? resolveResult(output.trim()) : reject(new Error(command + " exited " + code + ": " + output.slice(-1200)));
-    });
+    let finished = false;
+    const timer = setTimeout(() => child.kill("SIGTERM"), timeoutMs);
+    const finish = (error?: Error) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      if (error) fail(error);
+      else done(output.trim());
+    };
+    child.stdout.on("data", chunk => { output = (output + String(chunk)).slice(-4096); });
+    child.stderr.on("data", chunk => { output = (output + String(chunk)).slice(-4096); });
+    child.on("error", error => finish(error));
+    child.on("close", code => finish(code === 0 ? undefined : new Error(command + " exited " + code + ": " + output.slice(-1000))));
   });
 }
 
-let updating = false;
-
-/**
- * Explicit configuration:
- * PI_TELEGRAM_UPDATE_DIR: absolute checkout directory
- * PI_TELEGRAM_UPDATE_BRANCH: branch to fast-forward (defaults to main)
- * PI_TELEGRAM_RESTART_UNIT: allowlisted systemd user service
- */
 export async function updateTelegramCheckout(): Promise<string> {
   if (updating) throw new Error("Update already running");
-  const directory = process.env.PI_TELEGRAM_UPDATE_DIR;
-  const unit = process.env.PI_TELEGRAM_RESTART_UNIT;
-  const branch = process.env.PI_TELEGRAM_UPDATE_BRANCH ?? "main";
-  if (!directory?.startsWith("/") || resolve(directory) !== directory)
-    throw new Error("Set PI_TELEGRAM_UPDATE_DIR to an absolute checkout path");
-  if (!unit || !/^[a-zA-Z0-9_.@-]+\\.service$/.test(unit))
-    throw new Error("Set PI_TELEGRAM_RESTART_UNIT to a systemd user service");
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9._/-]*$/.test(branch) || branch.includes(".."))
-    throw new Error("Invalid update branch");
+  const unit = process.env.PI_TELEGRAM_RESTART_UNIT?.trim();
+  const scope = process.env.PI_TELEGRAM_RESTART_SCOPE === "system" ? "--system" : "--user";
+  if (!unit || !UNIT_RE.test(unit)) throw new Error("PI_TELEGRAM_RESTART_UNIT is not configured");
   updating = true;
   try {
-    const inside = await run("git", ["rev-parse", "--show-toplevel"], directory);
-    if (resolve(inside) !== directory) throw new Error("Update directory must be the Git checkout root");
-    const current = await run("git", ["branch", "--show-current"], directory);
-    if (current !== branch) throw new Error("Checkout is on " + current + ", expected " + branch);
-    const dirty = await run("git", ["status", "--porcelain"], directory);
-    if (dirty) throw new Error("Checkout contains local changes; update refused");
-    await run("git", ["fetch", "--prune", "origin", branch], directory);
-    await run("git", ["merge", "--ff-only", "FETCH_HEAD"], directory);
-    await run("npm", ["ci", "--ignore-scripts"], directory, 180000);
-    await run("npm", ["run", "build"], directory, 180000);
-    await run("npm", ["run", "typecheck"], directory, 180000);
-    // Restart after the Telegram callback has had time to publish its success message.
+    const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+    const top = await run("git", ["rev-parse", "--show-toplevel"], root);
+    if (resolve(top) !== root) throw new Error("Installed extension must be at its Git checkout root");
+    const origin = await run("git", ["remote", "get-url", "origin"], root);
+    if (!EXPECTED_ORIGIN.test(origin)) throw new Error("Unexpected Git origin");
+    const branch = await run("git", ["branch", "--show-current"], root);
+    if (branch !== "main") throw new Error("Checkout must be on main");
+    if (await run("git", ["status", "--porcelain"], root)) throw new Error("Checkout has local changes");
+    const active = await run("systemctl", [scope, "is-active", unit], root);
+    if (active !== "active") throw new Error("Configured Pi-Bolt service is not active");
+    await run("git", ["fetch", "--no-tags", "origin", "main"], root);
+    await run("git", ["merge", "--ff-only", "FETCH_HEAD"], root);
+    await run("npm", ["ci", "--ignore-scripts"], root, 180000);
+    await run("npm", ["run", "build"], root, 180000);
+    await run("npm", ["run", "typecheck"], root, 180000);
+    const sha = await run("git", ["rev-parse", "--short", "HEAD"], root);
     setTimeout(() => {
-      const child = spawn("systemctl", ["--user", "restart", unit], {
-        cwd: directory, detached: true, stdio: "ignore", shell: false,
-      });
+      const child = spawn("systemctl", [scope, "restart", unit], { detached: true, stdio: "ignore", shell: false });
       child.on("error", () => {});
       child.unref();
-    }, 2000);
-    return "Updated " + branch + "; build and typecheck passed. Restart scheduled.";
+    }, 3000);
+    return "Updated to " + sha + ". Build and typecheck passed; restarting Pi-Bolt.";
   } finally {
     updating = false;
   }
