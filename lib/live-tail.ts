@@ -5,6 +5,7 @@
  * consumer owns one send/edit handle and schedules throttled flushes.
  */
 import type { TelegramActivityEvent } from "./activity.ts";
+import type { TelegramLiveTailSettings } from "./config.ts";
 
 export interface LiveTailTool {
   id: string;
