@@ -15,6 +15,7 @@ interface LiveTailState {
   handle?: TelegramDeliveryHandle;
   lastText?: string;
   latest?: TelegramActivityContext;
+  replyToMessageId?: number;
   timer?: ReturnType<typeof setTimeout>;
   cleanup?: ReturnType<typeof setTimeout>;
   pending: boolean;
@@ -62,7 +63,7 @@ export function registerLiveTailConsumer() {
       const view = { text, parseMode: "html" as const };
       const result = state.handle
         ? await state.latest.edit(state.handle, view)
-        : await state.latest.send(view);
+        : await state.latest.send(view, { replyToMessageId: state.replyToMessageId });
       if (closed || activities.get(id) !== state) return;
       if (result.ok) {
         state.handle = result.value;
@@ -102,6 +103,7 @@ export function registerLiveTailConsumer() {
         state = {
           projection: createLiveTailProjection(event.activityId),
           pending: false, dirty: false, failed: false, settled: false, lastFlushStartedAt: 0, retryNotBefore: 0, hasContent: false,
+          replyToMessageId: event.replyToMessageId,
         };
         activities.set(event.activityId, state);
       }
