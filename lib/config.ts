@@ -184,6 +184,16 @@ export async function setTelegramThreadDisplayMode(
 }
 
 export type TelegramAssistantRenderingMode = "rich" | "html";
+export type TelegramLiveTailAutoDelete = "keep" | "immediate" | "5s" | "15s" | "30s" | "60s";
+export interface TelegramLiveTailSettings {
+  enabled?: boolean;
+  detail?: "minimal" | "standard" | "detailed";
+  reasoning?: "hidden" | "collapsed" | "expanded";
+  tools?: "hidden" | "active" | "recent";
+  interval?: 1 | 2 | 3;
+  autoDelete?: TelegramLiveTailAutoDelete;
+}
+
 export type TelegramActivityVerbosity =
   "quiet" | "thinking" | "tools" | "verbose";
 
@@ -201,6 +211,7 @@ export interface TelegramConfig {
   outboundHandlers?: TelegramOutboundHandlerConfig[];
   assistant?: {
     draftPreviews?: boolean;
+    liveTail?: TelegramLiveTailSettings;
     rendering?: TelegramAssistantRenderingMode;
     activity?: TelegramActivityVerbosity;
     timeInjection?: TelegramTimeMode;
@@ -1244,6 +1255,17 @@ export function createTelegramConfigControls(
   configStore: TelegramMutableConfigStore,
 ) {
   return {
+    getLiveTailSettings: () => ({ ...configStore.get().assistant?.liveTail }),
+    setLiveTailSettings: async (patch: TelegramLiveTailSettings) => {
+      await loadLatestTelegramConfig(configStore);
+      const current = configStore.get();
+      const config = { ...current, assistant: {
+        ...current.assistant,
+        liveTail: { ...current.assistant?.liveTail, ...patch },
+      } };
+      configStore.set(config);
+      await configStore.persist(config);
+    },
     areDraftPreviewsEnabled: createTelegramDraftPreviewsChecker(configStore),
     setDraftPreviewsEnabled: createTelegramDraftPreviewsSetter(configStore),
     getAssistantRenderingMode:
