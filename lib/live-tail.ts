@@ -92,19 +92,21 @@ export function escapeTelegramHtml(text: string): string {
 }
 
 /** Single-message HTML renderer, conservatively below Telegram's 4096-character limit. */
-export function renderLiveTail(snapshot: LiveTailSnapshot): string {
+export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiveTailSettings = {}): string {
   const parts: string[] = [];
-  if (snapshot.reasoning || snapshot.earlierReasoning) {
+  if (settings.reasoning !== "hidden" && (snapshot.reasoning || snapshot.earlierReasoning)) {
     parts.push("<b>Reasoning</b>");
-    if (snapshot.reasoning) parts.push(escapeTelegramHtml(snapshot.reasoning));
+    if (snapshot.reasoning) parts.push(settings.reasoning === "collapsed" || settings.reasoning === undefined
+      ? "<blockquote expandable>" + escapeTelegramHtml(snapshot.reasoning) + "</blockquote>"
+      : escapeTelegramHtml(snapshot.reasoning));
     if (snapshot.earlierReasoning) {
       parts.push("<blockquote expandable>" + escapeTelegramHtml(snapshot.earlierReasoning) + "</blockquote>");
     }
   }
-  if (snapshot.plan) parts.push("<b>Plan</b>\n" + escapeTelegramHtml(snapshot.plan));
-  if (snapshot.tools.length) {
+  if (settings.detail !== "minimal" && snapshot.plan) parts.push("<b>Plan</b>\n" + escapeTelegramHtml(snapshot.plan));
+  if (settings.tools !== "hidden" && snapshot.tools.length) {
     parts.push("<b>Tools</b>");
-    for (const tool of snapshot.tools) {
+    for (const tool of snapshot.tools.filter(t => settings.tools !== "active" || t.state === "running").slice(settings.detail === "minimal" ? -1 : settings.detail === "detailed" ? -8 : -4)) {
       const status = tool.state === "running" ? "…" : tool.state === "done" ? "✓" : "×";
       const duration = tool.elapsedMs === undefined ? "" : " · " + (tool.elapsedMs / 1000).toFixed(1) + "s";
       parts.push(status + " <code>" + escapeTelegramHtml(tool.name) + "</code>" + duration);
