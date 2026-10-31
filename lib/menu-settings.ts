@@ -838,7 +838,7 @@ export async function handleTelegramSettingsMenuCallbackAction(
   }
   if (data === "settings:live-tail:update") {
     await deps.updateSettingsMessage(
-      "<b>Update Live Tail</b>\nPull the configured branch, rebuild and restart the configured service. Requires a clean checkout.",
+      "<b>Update Live Tail</b>\nPull the configured branch, rebuild and restart the configured service. Requires a clean checkout.`,
       { inline_keyboard: [
         [{ text: "Confirm update", callback_data: "settings:live-tail:confirm" }],
         [{ text: "Cancel", callback_data: "settings:open:live-tail" }],
