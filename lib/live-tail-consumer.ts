@@ -15,12 +15,13 @@ export function registerLiveTailConsumer() {
     dirty: boolean;
     timer?: ReturnType<typeof setTimeout>;
     latest?: TelegramActivityContext;
+    failed: boolean;
   }>();
   let closed = false;
 
   const flush = async (id: string) => {
     const state = activities.get(id);
-    if (!state || closed || state.pending || !state.latest) return;
+    if (!state || closed || state.pending || !state.latest || state.failed) return;
     state.pending = true;
     state.dirty = false;
     try {
@@ -33,7 +34,13 @@ export function registerLiveTailConsumer() {
       if (result.ok) {
         state.handle = result.value;
         state.lastText = text;
+      } else if (result.reason === "stale-handle" || result.reason === "target-unauthorized" || result.reason === "commit-unknown" || result.reason === "message-unavailable") {
+        // Never send a replacement after an uncertain or stale edit.
+        state.failed = true;
       }
+    } catch {
+      // Activity rendering must never interrupt the Pi lifecycle.
+      state.failed = true;
     } finally {
       state.pending = false;
       if (state.dirty && !closed) {
@@ -49,7 +56,7 @@ export function registerLiveTailConsumer() {
       if (closed) return;
       let state = activities.get(event.activityId);
       if (!state) {
-        state = { projection: createLiveTailProjection(event.activityId), pending: false, dirty: false };
+        state = { projection: createLiveTailProjection(event.activityId), pending: false, dirty: false, failed: false };
         activities.set(event.activityId, state);
       }
       if (!state.projection.accept(event)) return;
