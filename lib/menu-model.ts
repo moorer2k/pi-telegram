@@ -221,6 +221,7 @@ export type TelegramModelMenuCallbackDeps<
   ) => Promise<void>;
   updateModelMenuMessage: () => Promise<void>;
   updateStatusMessage: () => Promise<void>;
+  confirmModelSelection?: (description: string) => Promise<void>;
   persistScopedModelPatterns?: (patterns: string[]) => Promise<void>;
   setModel: (model: TModel) => Promise<boolean>;
   setCurrentModel: (model: TModel) => void;
@@ -1047,7 +1048,8 @@ export async function handleTelegramModelMenuCallbackAction<
   };
   if (plan.mode === "restart-after-tool") {
     deps.stagePendingModelSwitch(plan.selection, continuationTurn);
-    await deps.updateModelMenuMessage();
+    if (deps.confirmModelSelection) await deps.confirmModelSelection("Model change scheduled after the active tool finishes.");
+    else await deps.updateModelMenuMessage();
     await deps.answerCallbackQuery(callbackQueryId, plan.callbackText);
     return true;
   }
@@ -1056,7 +1058,7 @@ export async function handleTelegramModelMenuCallbackAction<
       plan.selection,
       continuationTurn,
     );
-    await deps.updateModelMenuMessage();
+    if (!restarted) await deps.updateModelMenuMessage();
     if (!restarted) {
       await deps.answerCallbackQuery(
         callbackQueryId,
@@ -1064,9 +1066,9 @@ export async function handleTelegramModelMenuCallbackAction<
       );
       return true;
     }
-  } else {
-    await deps.updateModelMenuMessage();
   }
+  if (deps.confirmModelSelection) await deps.confirmModelSelection("Model selected: " + plan.callbackText);
+  else await deps.updateModelMenuMessage();
   await deps.answerCallbackQuery(callbackQueryId, plan.callbackText);
   return true;
 }
