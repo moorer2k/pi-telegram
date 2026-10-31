@@ -1929,6 +1929,7 @@ export interface TelegramAgentEndRuntimeDeps<
   updateStatus: () => void;
   dispatchNextQueuedTelegramTurn: () => void;
   scheduleActiveTurnDelivery?: (task: () => Promise<void>) => void;
+  onFinalTextDelivered?: (turn: TTurn) => void;
   preparePreviewDelivery?: (
     isDeliveryActive: () => boolean,
   ) =>
@@ -2045,6 +2046,7 @@ export interface TelegramAgentEndHookRuntimeDeps<
     TTurn,
     TReplyMarkup
   >["scheduleActiveTurnDelivery"];
+  onFinalTextDelivered?: (turn: TTurn) => void;
   reserveActiveTurnDelivery?: () => {
     schedule: (task: () => Promise<void>) => void;
     cancel: () => void;
@@ -2231,6 +2233,7 @@ export function createTelegramAgentEndHook<
                 await task();
               })
           : undefined,
+        onFinalTextDelivered: deps.onFinalTextDelivered,
         preparePreviewDelivery: deps.preparePreviewDelivery,
         preparePreviewClear: deps.preparePreviewClear,
         clearPreview: deps.clearPreview,
@@ -2601,6 +2604,7 @@ export async function handleTelegramAgentEndRuntime<
         }
         if (!isDeliveryActive()) return;
         setPreviewPendingText("");
+        deps.onFinalTextDelivered?.(turn);
       } catch (error) {
         deps.recordRuntimeEvent?.("delivery", error, {
           phase: "final-text",
