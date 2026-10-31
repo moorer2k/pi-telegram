@@ -362,6 +362,7 @@ export function buildTelegramSettingsMenuReplyMarkup(
       : true;
   const rows: Array<Array<{ text: string; callback_data: string }>> = [
     [{ text: "⬆️ Main menu", callback_data: "menu:back" }],
+    [{ text: "Close", callback_data: "menu:close" }],
   ];
   const settingsButtons: Array<{ text: string; callback_data: string }> = [
     {
@@ -685,6 +686,7 @@ function liveTailSettingsMarkup(settings: TelegramLiveTailSettings): TelegramSet
   return { inline_keyboard: [
     [{ text: "Update / Reload", callback_data: "settings:live-tail:update" }],
     [{ text: "Back", callback_data: "settings:list" }],
+    [{ text: "Close", callback_data: "menu:close" }],
     ...options.flatMap(([key, label, values]) => [
       [{ text: label + ": " + current[key], callback_data: "settings:live-tail:noop" }],
       values.map(value => ({
