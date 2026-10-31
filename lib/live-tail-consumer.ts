@@ -22,6 +22,7 @@ interface LiveTailState {
   failed: boolean;
   settled: boolean;
   lastFlushStartedAt: number;
+  retryNotBefore: number;
 }
 
 export function registerLiveTailConsumer() {
@@ -39,6 +40,7 @@ export function registerLiveTailConsumer() {
   function schedule(id: string, delay: number): void {
     const state = activities.get(id);
     if (!state || closed || state.failed) return;
+    delay = Math.max(delay, state.retryNotBefore - Date.now());
     if (state.timer) clearTimeout(state.timer);
     state.timer = setTimeout(() => {
       state.timer = undefined;
@@ -65,7 +67,8 @@ export function registerLiveTailConsumer() {
         state.lastText = text;
       } else if (result.reason === "rate-limited") {
         state.dirty = true;
-        schedule(id, Math.max(EDIT_INTERVAL_MS, result.retryAfterMs ?? 3000));
+        state.retryNotBefore = Date.now() + Math.max(EDIT_INTERVAL_MS, result.retryAfterMs ?? 3000);
+        schedule(id, state.retryNotBefore - Date.now());
       } else {
         // No replacement sends on unknown ACK, stale authority, or invalid edits.
         state.failed = true;
@@ -96,7 +99,7 @@ export function registerLiveTailConsumer() {
         }
         state = {
           projection: createLiveTailProjection(event.activityId),
-          pending: false, dirty: false, failed: false, settled: false, lastFlushStartedAt: 0,
+          pending: false, dirty: false, failed: false, settled: false, lastFlushStartedAt: 0, retryNotBefore: 0,
         };
         activities.set(event.activityId, state);
       }
