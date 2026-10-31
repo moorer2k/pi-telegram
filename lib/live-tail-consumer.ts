@@ -146,10 +146,14 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
       "30s": 30000, "60s": 60000,
     };
     const ms = delay[getSettings().autoDelete ?? "keep"];
-    if (ms === undefined) return;
+    if (ms === undefined) {
+      state.cleanup = setTimeout(() => clearState(id), RETAIN_SETTLED_MS);
+      return;
+    }
     state.cleanup = setTimeout(() => {
-      if (closed || activities.get(id) !== state || !state.handle || !state.latest) return;
-      void state.latest.delete(state.handle).catch(() => {});
+      if (closed || activities.get(id) !== state) return;
+      if (state.pending) { state.cleanup = undefined; scheduleAutoDelete(id, state); return; }
+      if (state.handle && state.latest) void state.latest.delete(state.handle).catch(() => {});
       clearState(id);
     }, ms);
   }
@@ -162,8 +166,8 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
   const onFinalDelivered = (chatId: number, replyToMessageId: number | undefined) => {
     if (closed) return;
     for (const [id, state] of activities) {
-      const target = state.latest?.defaultScope;
-      if (target?.kind !== "target" || target.target.chatId !== chatId ||
+      const target = state.handle?.target ?? (state.latest?.defaultScope.kind === "target" ? state.latest.defaultScope.target : undefined);
+      if (!target || target.chatId !== chatId ||
           state.replyToMessageId !== replyToMessageId || state.finalDelivered) continue;
       state.finalDelivered = true;
       if (state.cleanup) { clearTimeout(state.cleanup); state.cleanup = undefined; }
