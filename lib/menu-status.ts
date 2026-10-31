@@ -165,6 +165,7 @@ export function buildStatusReplyMarkup(
       callback_data: "menu:settings",
     },
   ]);
+  rows.push([{ text: "Close", callback_data: "menu:close" }]);
   return { inline_keyboard: rows };
 }
 
