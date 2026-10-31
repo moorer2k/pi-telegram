@@ -27,7 +27,7 @@ interface LiveTailState {
   hasContent: boolean;
 }
 
-export function registerLiveTailConsumer() {
+export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSettings = () => ({})) {
   const activities = new Map<string, LiveTailState>();
   let closed = false;
 
@@ -57,7 +57,8 @@ export function registerLiveTailConsumer() {
     state.lastFlushStartedAt = Date.now();
     state.dirty = false;
     try {
-      const text = renderLiveTail(state.projection.getSnapshot());
+      const settings = getSettings();
+      const text = renderLiveTail(state.projection.getSnapshot(), settings);
       // Do not emit a status-only message for turns without visible activity.
       if (!state.hasContent || text === state.lastText) return;
       const view = { text, parseMode: "html" as const };
@@ -92,7 +93,7 @@ export function registerLiveTailConsumer() {
   const dispose = registerTelegramActivityHandler({
     id: "@llblab/pi-telegram/live-tail",
     handle(event: TelegramActivityEvent, ctx: TelegramActivityContext) {
-      if (closed || event.source !== "telegram") return;
+      if (closed || event.source !== "telegram" || getSettings().enabled === false) return;
       let state = activities.get(event.activityId);
       if (!state) {
         if (event.type !== "agent-start") return;
@@ -122,8 +123,9 @@ export function registerLiveTailConsumer() {
       } else {
         // Throttle rather than debounce: continuous token deltas must not postpone updates forever.
         if (!state.timer || state.settled) {
+          const interval = (getSettings().interval ?? 2) * 1000;
           const elapsed = Date.now() - state.lastFlushStartedAt;
-          schedule(event.activityId, state.settled ? 0 : Math.max(0, EDIT_INTERVAL_MS - elapsed));
+          schedule(event.activityId, state.settled ? 0 : Math.max(0, interval - elapsed));
         }
       }
     },
