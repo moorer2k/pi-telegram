@@ -19,6 +19,7 @@ import * as Delivery from "./delivery.ts";
 import * as Inbound from "./inbound.ts";
 import * as Journal from "./journal.ts";
 import * as Lifecycle from "./lifecycle.ts";
+import { registerLiveTailConsumer, type LiveTailConsumer } from "./live-tail-consumer.ts";
 import * as Locks from "./locks.ts";
 import * as Logging from "./logging.ts";
 import * as Media from "./media.ts";
@@ -41,6 +42,7 @@ import * as Replies from "./replies.ts";
 import * as Routing from "./routing.ts";
 import * as Runtime from "./runtime.ts";
 import * as Sections from "./sections.ts";
+import { updateTelegramCheckout } from "./self-update.ts";
 import * as Skills from "./skills.ts";
 import * as Status from "./status.ts";
 import * as Sync from "./sync.ts";
@@ -996,7 +998,7 @@ export default function (pi: Pi.ExtensionAPI) {
     getMessageText: Replies.getAgentMessageText,
     getDefaultReplyToMessageId: activeTurnRuntime.getReplyToMessageId,
     sendDraft: nativeMarkdownDraftSender,
-    canSend: configControls.areDraftPreviewsEnabled,
+    canSend: () => !configControls.getLiveTailSettings().enabled && process.env.PI_TELEGRAM_LIVE_TAIL !== "1" && configControls.areDraftPreviewsEnabled(),
     sendMarkdownReply,
     recordRuntimeEvent,
     ...replyTransport,
@@ -1008,6 +1010,7 @@ export default function (pi: Pi.ExtensionAPI) {
     publicationRuntime,
   } = Bindings.createTelegramActivityBindingRuntime({
     generation: deliveryGenerationSeed,
+    isLiveTailEnabled: () => configControls.getLiveTailSettings().enabled === true || process.env.PI_TELEGRAM_LIVE_TAIL === "1",
     captureDrain: captureCleanupDrain,
     assistantOutput: {
       prepareTelegramPreview: previewRuntime.preparePublication,
@@ -1206,6 +1209,7 @@ export default function (pi: Pi.ExtensionAPI) {
       sendInteractiveMessage,
       answerCallbackQuery,
       ...configControls,
+      updateLiveTail: updateTelegramCheckout,
       reviewInactiveThreads: inactiveThreadCleanupRuntime.review,
       cleanInactiveThreads: inactiveThreadCleanupRuntime.clean,
       getThreadDisplayMode() {
@@ -3072,6 +3076,7 @@ export default function (pi: Pi.ExtensionAPI) {
   });
 
   // --- Lifecycle Hooks ---
+  let liveTailConsumer: LiveTailConsumer | undefined;
 
   Bindings.registerTelegramLifecycleRuntimeHooks({
     pi,
@@ -3079,7 +3084,14 @@ export default function (pi: Pi.ExtensionAPI) {
       ...sessionLifecycleRuntime,
       onModelSelect: currentModelRuntime.onModelSelect,
     },
-    activityRuntime,
+    activityRuntime: {
+      ...activityRuntime,
+      onSessionShutdown() {
+        liveTailConsumer?.dispose();
+        liveTailConsumer = undefined;
+        activityRuntime.onSessionShutdown();
+      },
+    },
     activityVerbosityRuntime,
     diagnostics: runtimeDiagnostics,
     assistantOutputRuntime,
@@ -3099,7 +3111,12 @@ export default function (pi: Pi.ExtensionAPI) {
     shutdownGenerativeAppLiveSurfaces: generativeAppLiveSurfaceBinding.shutdown,
     resolveAutomaticThreadCleanupEnabled:
       configControls.resolveAutomaticThreadCleanupEnabled,
+    onFinalTextDelivered(turn) {
+      liveTailConsumer?.onFinalDelivered(turn.chatId, turn.replyToMessageId);
+    },
     onSessionStarted(_event, ctx) {
+      liveTailConsumer?.dispose();
+      liveTailConsumer = registerLiveTailConsumer(() => ({ ...configControls.getLiveTailSettings(), enabled: configControls.getLiveTailSettings().enabled === true || process.env.PI_TELEGRAM_LIVE_TAIL === "1" }));
       sessionActionAssembly.settlement.onSessionStart(ctx);
     },
     buttonActionStore,
@@ -3121,7 +3138,10 @@ export default function (pi: Pi.ExtensionAPI) {
     editGuestReply,
     editGuestInlineMessage: telegramApiRuntime.editGuestInlineMessage,
     stopGuestPlaceholder: guestPlaceholderRuntime.stop,
-    finalizeMarkdownPreview,
+    finalizeMarkdownPreview: async (...args) => {
+      if (configControls.getLiveTailSettings().enabled === true || process.env.PI_TELEGRAM_LIVE_TAIL === "1") return false;
+      return finalizeMarkdownPreview(...args);
+    },
     preparePreviewDelivery,
     proactivePushTargetGetter,
     getAssistantRenderingMode: configControls.getAssistantRenderingMode,

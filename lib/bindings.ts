@@ -718,6 +718,7 @@ export interface TelegramActivityBindingRuntime {
 /** Compose public activity fanout, verbosity, and assistant output ordering. */
 export function createTelegramActivityBindingRuntime<TTransportStamp>(deps: {
   generation: string;
+  isLiveTailEnabled?: () => boolean;
   captureDrain?: () => (() => void) | undefined;
   assistantOutput: Omit<
     Parameters<
@@ -757,8 +758,10 @@ export function createTelegramActivityBindingRuntime<TTransportStamp>(deps: {
     generation: deps.generation,
     captureDrain: deps.captureDrain,
     observeEvent(event) {
-      assistantOutputBinding.observeEvent(event);
-      activityVerbosityRuntime.accept(event);
+      if (!deps.isLiveTailEnabled?.()) {
+        assistantOutputBinding.observeEvent(event);
+        activityVerbosityRuntime.accept(event);
+      }
     },
     recordFailure(handlerId, event, error) {
       deps.assistantOutput.recordRuntimeEvent("activity", error, {
@@ -1292,6 +1295,7 @@ export function registerTelegramLifecycleRuntimeHooks({
   modelContextAvailabilityRuntime,
   disconnectOnQuit,
   onSessionStarted,
+  onFinalTextDelivered,
   shutdownGenerativeAppLiveSurfaces,
   resolveAutomaticThreadCleanupEnabled,
   buttonActionStore,
@@ -1535,6 +1539,7 @@ export function registerTelegramLifecycleRuntimeHooks({
         cancel: reservation.cancel,
       };
     },
+    onFinalTextDelivered,
     preparePreviewDelivery,
     preparePreviewClear: previewRuntime.prepareClear,
     clearPreview: previewRuntime.clear,
