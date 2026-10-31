@@ -160,6 +160,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
       if (target?.kind !== "target" || target.target.chatId !== chatId ||
           state.replyToMessageId !== replyToMessageId || state.finalDelivered) continue;
       state.finalDelivered = true;
+      if (state.cleanup) { clearTimeout(state.cleanup); state.cleanup = undefined; }
       scheduleAutoDelete(id, state);
     }
   };
