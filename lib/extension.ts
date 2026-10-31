@@ -3081,7 +3081,14 @@ export default function (pi: Pi.ExtensionAPI) {
       ...sessionLifecycleRuntime,
       onModelSelect: currentModelRuntime.onModelSelect,
     },
-    activityRuntime,
+    activityRuntime: {
+      ...activityRuntime,
+      onSessionShutdown() {
+        disposeLiveTail?.();
+        disposeLiveTail = undefined;
+        activityRuntime.onSessionShutdown();
+      },
+    },
     activityVerbosityRuntime,
     diagnostics: runtimeDiagnostics,
     assistantOutputRuntime,
