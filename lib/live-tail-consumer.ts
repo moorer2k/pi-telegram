@@ -12,6 +12,7 @@ export function registerLiveTailConsumer() {
     handle?: TelegramDeliveryHandle;
     lastText?: string;
     pending: boolean;
+    dirty: boolean;
     timer?: ReturnType<typeof setTimeout>;
     latest?: TelegramActivityContext;
   }>();
@@ -21,6 +22,7 @@ export function registerLiveTailConsumer() {
     const state = activities.get(id);
     if (!state || closed || state.pending || !state.latest) return;
     state.pending = true;
+    state.dirty = false;
     try {
       const text = renderLiveTail(state.projection.getSnapshot());
       if (text === state.lastText || text === "<b>Status</b>\nWorking") return;
@@ -34,6 +36,10 @@ export function registerLiveTailConsumer() {
       }
     } finally {
       state.pending = false;
+      if (state.dirty && !closed) {
+        if (state.timer) clearTimeout(state.timer);
+        state.timer = setTimeout(() => { state!.timer = undefined; void flush(id); }, 1200);
+      }
     }
   };
 
@@ -43,20 +49,18 @@ export function registerLiveTailConsumer() {
       if (closed) return;
       let state = activities.get(event.activityId);
       if (!state) {
-        state = { projection: createLiveTailProjection(event.activityId), pending: false };
+        state = { projection: createLiveTailProjection(event.activityId), pending: false, dirty: false };
         activities.set(event.activityId, state);
       }
       if (!state.projection.accept(event)) return;
       state.latest = ctx;
+      if (state.pending) { state.dirty = true; return; }
       if (state.timer) clearTimeout(state.timer);
       const settled = event.type === "agent-settled";
       state.timer = setTimeout(() => {
         state!.timer = undefined;
         void flush(event.activityId);
-        if (settled) {
-          // Allow the final flush to finish before forgetting local state.
-          setTimeout(() => activities.delete(event.activityId), 3000);
-        }
+  
       }, settled ? 0 : 1200);
     },
   });
