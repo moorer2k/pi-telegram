@@ -3136,7 +3136,10 @@ export default function (pi: Pi.ExtensionAPI) {
     editGuestReply,
     editGuestInlineMessage: telegramApiRuntime.editGuestInlineMessage,
     stopGuestPlaceholder: guestPlaceholderRuntime.stop,
-    finalizeMarkdownPreview,
+    finalizeMarkdownPreview: async (...args) => {
+      if (configControls.getLiveTailSettings().enabled === true || process.env.PI_TELEGRAM_LIVE_TAIL === "1") return false;
+      return finalizeMarkdownPreview(...args);
+    },
     preparePreviewDelivery,
     proactivePushTargetGetter,
     getAssistantRenderingMode: configControls.getAssistantRenderingMode,
