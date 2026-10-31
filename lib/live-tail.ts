@@ -92,27 +92,62 @@ export function escapeTelegramHtml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-/** Single-message HTML renderer, conservatively below Telegram's 4096-character limit. */
+/** Telegram supports expandable blockquotes, not arbitrary collapsible message sections.
+ * Keep current work visible; fold older reasoning and completed tools in detailed mode.
+ */
 export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiveTailSettings = {}): string {
+  const detail = settings.detail ?? "standard";
   const parts: string[] = [];
-  if (settings.reasoning !== "hidden" && (snapshot.reasoning || snapshot.earlierReasoning)) {
-    parts.push("<b>Reasoning</b>");
-    if (snapshot.reasoning) parts.push(settings.reasoning === "collapsed" || settings.reasoning === undefined
-      ? "<blockquote expandable>" + escapeTelegramHtml(snapshot.reasoning) + "</blockquote>"
-      : escapeTelegramHtml(snapshot.reasoning));
-    if (snapshot.earlierReasoning) {
-      parts.push("<blockquote expandable>" + escapeTelegramHtml(snapshot.earlierReasoning) + "</blockquote>");
+  const expandable = (value: string) => "<blockquote expandable>" + value + "</blockquote>";
+  const clean = (value: string, max: number) => escapeTelegramHtml(value.slice(-max));
+  const reasoning = settings.reasoning ?? "collapsed";
+
+  if (reasoning !== "hidden" && (snapshot.reasoning || snapshot.earlierReasoning)) {
+    const reasoningParts: string[] = [];
+    if (snapshot.reasoning) {
+      const current = clean(snapshot.reasoning, detail === "detailed" ? 850 : detail === "minimal" ? 180 : 450);
+      reasoningParts.push(reasoning === "expanded" ? current : expandable(current));
     }
+    if (snapshot.earlierReasoning && detail !== "minimal") {
+      reasoningParts.push("<i>Earlier reasoning · tap to expand</i>\n" + expandable(clean(snapshot.earlierReasoning, 750)));
+    }
+    parts.push("<b>Reasoning</b>\n" + reasoningParts.join("\n"));
   }
-  if (settings.detail !== "minimal" && snapshot.plan) parts.push("<b>Plan</b>\n" + escapeTelegramHtml(snapshot.plan));
+
+  if (detail !== "minimal" && snapshot.plan) {
+    parts.push("<b>Plan</b>\n" + clean(snapshot.plan, detail === "detailed" ? 750 : 350));
+  }
+
   if (settings.tools !== "hidden" && snapshot.tools.length) {
-    parts.push("<b>Tools</b>");
-    for (const tool of snapshot.tools.filter(t => settings.tools !== "active" || t.state === "running").slice(settings.detail === "minimal" ? -1 : settings.detail === "detailed" ? -8 : -4)) {
+    const all = snapshot.tools.filter(t => settings.tools !== "active" || t.state === "running");
+    const max = detail === "minimal" ? 1 : detail === "detailed" ? 8 : 4;
+    const selected = all.slice(-max);
+    const renderTool = (tool: LiveTailTool): string => {
       const status = tool.state === "running" ? "…" : tool.state === "done" ? "✓" : "×";
       const duration = tool.elapsedMs === undefined ? "" : " · " + (tool.elapsedMs / 1000).toFixed(1) + "s";
-      parts.push(status + " <code>" + escapeTelegramHtml(tool.name) + "</code>" + duration);
+      return status + " <code>" + clean(tool.name, 90) + "</code>" + duration;
+    };
+    const active = selected.filter(t => t.state === "running");
+    const finished = selected.filter(t => t.state !== "running");
+    const rows: string[] = [];
+    if (active.length) rows.push(...active.map(renderTool));
+    if (finished.length) {
+      if (detail === "detailed") {
+        rows.push("<i>Completed tools (" + finished.length + ") · tap to expand</i>\n" + expandable(finished.map(renderTool).join("\n")));
+      } else if (detail === "standard") {
+        rows.push(...finished.slice(-2).map(renderTool));
+      } else if (!active.length) {
+        rows.push(renderTool(finished[finished.length - 1]));
+      }
     }
+    if (rows.length) parts.push("<b>Tools</b>\n" + rows.join("\n"));
   }
-  parts.push("<b>Status</b>\n" + (snapshot.settled ? "Completed" : "Working"));
-  return parts.join("\n\n");
+
+  const running = snapshot.tools.filter(t => t.state === "running").length;
+  const completed = snapshot.tools.filter(t => t.state === "done").length;
+  const failed = snapshot.tools.filter(t => t.state === "error").length;
+  const status = snapshot.settled ? "Completed" : running ? "Running " + running + " tool" + (running === 1 ? "" : "s") : "Working";
+  const counters = detail === "detailed" ? "\nTools: " + completed + " done" + (failed ? " · " + failed + " failed" : "") + " · " + running + " active" : "";
+  parts.push("<b>Status</b>\n" + status + counters);
+  return parts.join("\n\n").slice(0, 3900);
 }
