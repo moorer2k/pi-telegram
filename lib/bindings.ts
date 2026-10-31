@@ -718,6 +718,7 @@ export interface TelegramActivityBindingRuntime {
 /** Compose public activity fanout, verbosity, and assistant output ordering. */
 export function createTelegramActivityBindingRuntime<TTransportStamp>(deps: {
   generation: string;
+  isLiveTailEnabled?: () => boolean;
   captureDrain?: () => (() => void) | undefined;
   assistantOutput: Omit<
     Parameters<
@@ -757,7 +758,7 @@ export function createTelegramActivityBindingRuntime<TTransportStamp>(deps: {
     generation: deps.generation,
     captureDrain: deps.captureDrain,
     observeEvent(event) {
-      if (process.env.PI_TELEGRAM_LIVE_TAIL !== "1") {
+      if (!deps.isLiveTailEnabled?.()) {
         assistantOutputBinding.observeEvent(event);
         activityVerbosityRuntime.accept(event);
       }
