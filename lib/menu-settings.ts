@@ -696,7 +696,7 @@ function liveTailSettingsMarkup(settings: TelegramLiveTailSettings): TelegramSet
 async function updateLiveTailSettingsMessage(deps: TelegramSettingsMenuCallbackDeps): Promise<void> {
   const settings = deps.getLiveTailSettings?.() ?? {};
   await deps.updateSettingsMessage(
-    "<b>Live Tail</b>\\nOne editable activity message. Final answers always arrive as a new message.\\nAuto-delete applies only to activity messages.",
+    "<b>Live Tail</b>\nOne editable activity message. Final answers always arrive as a new message.\nAuto-delete applies only to activity messages.",
     liveTailSettingsMarkup(settings),
   );
 }
