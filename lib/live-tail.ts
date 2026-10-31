@@ -10,6 +10,7 @@ import type { TelegramLiveTailSettings } from "./config.ts";
 export interface LiveTailTool {
   id: string;
   name: string;
+  command?: string;
   startedAt: number;
   elapsedMs?: number;
   state: "running" | "done" | "error";
@@ -28,7 +29,27 @@ export interface LiveTailSnapshot {
 const MAX_REASONING = 500;
 const MAX_EARLIER = 600;
 const MAX_PLAN = 400;
-const MAX_TOOLS = 8;
+const MAX_TOOLS = 12;
+
+/** Only surface an explicit command/path, never arbitrary serialized tool arguments.
+ * Reject credential-bearing or shell-environment assignments before showing a preview.
+ */
+function toolCommand(name: string, args: unknown): string | undefined {
+  if (!args || typeof args !== "object" || Array.isArray(args)) return undefined;
+  const data = args as Record<string, unknown>;
+  const candidates = /^(bash|terminal|exec|shell|command|run|ssh)$/i.test(name)
+    ? ["command", "cmd", "script"]
+    : /^(read_file|write_file|edit_file|read|write|edit|grep|find|ls|search)$/i.test(name)
+      ? ["path", "file_path", "filePath", "pattern", "query"]
+      : [];
+  const key = candidates.find(k => typeof data[k] === "string");
+  if (!key) return undefined;
+  const value = String(data[key]).replace(/[\r\n\t]+/g, " ").trim();
+  if (!value || /(?:password|passwd|secret|token|api[_-]?key|authorization|bearer|private[_-]?key|credential|--password|--token|--key|\.env(?:\b|\/))/i.test(value)) return undefined;
+  if (/(?:^|\s)[A-Za-z_][A-Za-z0-9_]*(?:PASSWORD|TOKEN|SECRET|KEY)\s*=/.test(value)) return undefined;
+  return value.length > 180 ? value.slice(0, 177) + "..." : value;
+}
+
 
 function appendBounded(current: string, addition: string, limit: number): string {
   return (current + addition).slice(-limit);
@@ -63,7 +84,7 @@ export function createLiveTailProjection(activityId: string) {
         if (event.placement === "intermediate") snapshot.plan = event.text.slice(-MAX_PLAN);
         break;
       case "tool-start":
-        snapshot.tools.push({ id: event.toolCallId, name: event.toolName.slice(0, 70), startedAt: event.timestamp, state: "running" });
+        snapshot.tools.push({ id: event.toolCallId, name: event.toolName.slice(0, 70), command: toolCommand(event.toolName, event.args), startedAt: event.timestamp, state: "running" });
         if (snapshot.tools.length > MAX_TOOLS) snapshot.tools.splice(0, snapshot.tools.length - MAX_TOOLS);
         break;
       case "tool-end": {
@@ -92,27 +113,65 @@ export function escapeTelegramHtml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-/** Single-message HTML renderer, conservatively below Telegram's 4096-character limit. */
+/** Telegram supports expandable blockquotes, not arbitrary collapsible message sections.
+ * Keep current work visible; fold older reasoning and completed tools in detailed mode.
+ */
 export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiveTailSettings = {}): string {
+  const detail = settings.detail ?? "standard";
   const parts: string[] = [];
-  if (settings.reasoning !== "hidden" && (snapshot.reasoning || snapshot.earlierReasoning)) {
-    parts.push("<b>Reasoning</b>");
-    if (snapshot.reasoning) parts.push(settings.reasoning === "collapsed" || settings.reasoning === undefined
-      ? "<blockquote expandable>" + escapeTelegramHtml(snapshot.reasoning) + "</blockquote>"
-      : escapeTelegramHtml(snapshot.reasoning));
-    if (snapshot.earlierReasoning) {
-      parts.push("<blockquote expandable>" + escapeTelegramHtml(snapshot.earlierReasoning) + "</blockquote>");
+  const expandable = (value: string) => "<blockquote expandable>" + value + "</blockquote>";
+  const clean = (value: string, max: number) => escapeTelegramHtml(value.slice(-max));
+  const reasoning = settings.reasoning ?? "collapsed";
+
+  if (reasoning !== "hidden" && (snapshot.reasoning || snapshot.earlierReasoning)) {
+    const reasoningParts: string[] = [];
+    if (snapshot.reasoning) {
+      const current = clean(snapshot.reasoning, detail === "detailed" ? 850 : detail === "minimal" ? 180 : 450);
+      reasoningParts.push(reasoning === "expanded" ? current : expandable(current));
     }
+    if (snapshot.earlierReasoning && detail !== "minimal") {
+      reasoningParts.push("<i>Earlier reasoning · tap to expand</i>\n" + expandable(clean(snapshot.earlierReasoning, 750)));
+    }
+    parts.push("<b>Reasoning</b>\n" + reasoningParts.join("\n"));
   }
-  if (settings.detail !== "minimal" && snapshot.plan) parts.push("<b>Plan</b>\n" + escapeTelegramHtml(snapshot.plan));
+
+  if (detail !== "minimal" && snapshot.plan) {
+    parts.push("<b>Plan</b>\n" + clean(snapshot.plan, detail === "detailed" ? 750 : 350));
+  }
+
+  if (detail === "detailed") parts.unshift("<b>PI-BOLT // LIVE TERMINAL</b>");
+
   if (settings.tools !== "hidden" && snapshot.tools.length) {
-    parts.push("<b>Tools</b>");
-    for (const tool of snapshot.tools.filter(t => settings.tools !== "active" || t.state === "running").slice(settings.detail === "minimal" ? -1 : settings.detail === "detailed" ? -8 : -4)) {
+    const all = snapshot.tools.filter(t => settings.tools !== "active" || t.state === "running");
+    const max = detail === "minimal" ? 1 : detail === "detailed" ? 8 : 4;
+    const selected = all.slice(-max);
+    const renderTool = (tool: LiveTailTool): string => {
       const status = tool.state === "running" ? "…" : tool.state === "done" ? "✓" : "×";
       const duration = tool.elapsedMs === undefined ? "" : " · " + (tool.elapsedMs / 1000).toFixed(1) + "s";
-      parts.push(status + " <code>" + escapeTelegramHtml(tool.name) + "</code>" + duration);
+      const command = detail === "detailed" && tool.command ? " · <code>" + clean(tool.command, 180) + "</code>" : "";
+      return status + " <code>" + clean(tool.name, 70) + "</code>" + command + duration;
+    };
+    const active = selected.filter(t => t.state === "running");
+    const finished = selected.filter(t => t.state !== "running");
+    const rows: string[] = [];
+    if (active.length) rows.push(...active.map(renderTool));
+    if (finished.length) {
+      if (detail === "detailed") {
+        rows.push("<i>Completed tools (" + finished.length + ") · tap to expand</i>\n" + expandable(finished.map(renderTool).join("\n")));
+      } else if (detail === "standard") {
+        rows.push(...finished.slice(-2).map(renderTool));
+      } else if (!active.length) {
+        rows.push(renderTool(finished[finished.length - 1]));
+      }
     }
+    if (rows.length) parts.push("<b>Tools</b>\n" + rows.join("\n"));
   }
-  parts.push("<b>Status</b>\n" + (snapshot.settled ? "Completed" : "Working"));
-  return parts.join("\n\n");
+
+  const running = snapshot.tools.filter(t => t.state === "running").length;
+  const completed = snapshot.tools.filter(t => t.state === "done").length;
+  const failed = snapshot.tools.filter(t => t.state === "error").length;
+  const status = snapshot.settled ? "Completed" : running ? "Running " + running + " tool" + (running === 1 ? "" : "s") : "Working";
+  const counters = detail === "detailed" ? "\nTools: " + completed + " done" + (failed ? " · " + failed + " failed" : "") + " · " + running + " active" : "";
+  parts.push("<b>Status</b>\n" + status + counters);
+  return parts.join("\n\n").slice(0, 3900);
 }
