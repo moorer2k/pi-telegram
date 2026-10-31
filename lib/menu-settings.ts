@@ -1203,6 +1203,9 @@ export function createTelegramSettingsMenuRuntime<
         if (allowed[key]?.includes(value)) {
           await deps.editInteractiveMessage(state.chatId, state.messageId, "<b>Setting saved</b>\nLive Tail " + key + ": " + value, "html", { inline_keyboard: [] });
         }
+      } else if (handled && settingAction && settingAction.startsWith("settings:set:") && !settingLabels[settingAction]) {
+        const safe = settingAction.slice("settings:set:".length).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+        await deps.editInteractiveMessage(state.chatId, state.messageId, "<b>Setting applied</b>\n" + safe, "html", { inline_keyboard: [] });
       } else if (handled && settingAction && settingLabels[settingAction]) {
         await deps.editInteractiveMessage(state.chatId, state.messageId, "<b>Setting saved</b>\n" + settingLabels[settingAction], "html", { inline_keyboard: [] });
       }
