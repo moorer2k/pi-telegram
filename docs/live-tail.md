@@ -12,6 +12,12 @@ PI_TELEGRAM_LIVE_TAIL=1 pi
 
 **Build required:** this package loads its compiled `dist/` entrypoint. From a working clone run `npm ci && npm run build` before testing the feature. Changing `lib/` alone does not change an installed runtime.
 
+## Menu settings
+
+The submenu offers: on/off, minimal/standard/detailed activity, hidden/collapsed/expanded reasoning, hidden/active/recent tools, 1/2/3-second refresh, and Keep/Immediately/5s/15s/30s/60s auto-delete.
+
+Normal text final answers are delivered as **new messages** instead of editing the activity message. The auto-delete countdown begins only after successful final-text delivery and activity settlement; only the activity message is deleted. Attachment-only, voice, and other specialized delivery paths do not yet acknowledge final delivery for auto-delete.
+
 ## Behavior
 
 - A single activity message is created after activity starts and useful output arrives.
