@@ -1157,7 +1157,14 @@ export function createTelegramSettingsMenuRuntime<
         state.mode = "settings";
         deps.storeModelMenuState(state);
       }
-      return handleTelegramSettingsMenuCallbackAction(query.id, query.data, {
+      const settingAction = query.data;
+      const settingLabels: Record<string, string> = {
+        "settings:set:draft-previews:on": "Draft previews enabled",
+        "settings:set:draft-previews:off": "Draft previews disabled",
+        "settings:set:automatic-thread-cleanup:on": "Automatic thread cleanup enabled",
+        "settings:set:automatic-thread-cleanup:off": "Automatic thread cleanup disabled",
+      };
+      const handled = await handleTelegramSettingsMenuCallbackAction(query.id, query.data, {
         ...readSettingsState(),
         setThreadDisplayMode: deps.setThreadDisplayMode,
         setDraftPreviewsEnabled: deps.setDraftPreviewsEnabled,
@@ -1185,6 +1192,21 @@ export function createTelegramSettingsMenuRuntime<
         answerCallbackQuery: deps.answerCallbackQuery,
         sectionRegistry,
       });
+      if (handled && settingAction && settingAction.startsWith("settings:live-tail:") && !["settings:live-tail:update", "settings:live-tail:confirm", "settings:live-tail:noop"].includes(settingAction)) {
+        const parts = settingAction.split(":");
+        const key = parts[2], value = parts[3];
+        const allowed: Record<string, string[]> = {
+          enabled: ["on", "off"], detail: ["minimal", "standard", "detailed"],
+          reasoning: ["hidden", "collapsed", "expanded"], tools: ["hidden", "active", "recent"],
+          interval: ["1", "2", "3"], autoDelete: ["keep", "immediate", "5s", "15s", "30s", "60s"],
+        };
+        if (allowed[key]?.includes(value)) {
+          await deps.editInteractiveMessage(state.chatId, state.messageId, "<b>Setting saved</b>\nLive Tail " + key + ": " + value, "html", { inline_keyboard: [] });
+        }
+      } else if (handled && settingAction && settingLabels[settingAction]) {
+        await deps.editInteractiveMessage(state.chatId, state.messageId, "<b>Setting saved</b>\n" + settingLabels[settingAction], "html", { inline_keyboard: [] });
+      }
+      return handled;
     },
   };
 }
