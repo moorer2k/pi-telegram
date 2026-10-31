@@ -5,10 +5,11 @@
 import { registerTelegramActivityHandler, type TelegramActivityContext, type TelegramActivityEvent } from "./activity.ts";
 import { createLiveTailProjection, renderLiveTail } from "./live-tail.ts";
 import type { TelegramDeliveryHandle } from "./delivery.ts";
+import type { TelegramLiveTailSettings } from "./config.ts";
 
 const EDIT_INTERVAL_MS = 1200;
 const MAX_TRACKED_ACTIVITIES = 32;
-const RETAIN_SETTLED_MS = 5000;
+const RETAIN_SETTLED_MS = 120000;
 
 interface LiveTailState {
   projection: ReturnType<typeof createLiveTailProjection>;
@@ -28,7 +29,12 @@ interface LiveTailState {
   finalDelivered: boolean;
 }
 
-export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSettings = () => ({})) {
+export interface LiveTailConsumer {
+  dispose(): void;
+  onFinalDelivered(chatId: number, replyToMessageId: number | undefined): void;
+}
+
+export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSettings = () => ({})): LiveTailConsumer {
   const activities = new Map<string, LiveTailState>();
   let closed = false;
 
