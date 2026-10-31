@@ -606,6 +606,8 @@ export async function handleTelegramMenuCallbackRuntime<
   });
 }
 
+const latestStatusMenuByTarget = new Map<string, number>();
+
 export function createTelegramMenuActionRuntime<
   TContext,
   TModel extends MenuModel = MenuModel,
@@ -661,14 +663,14 @@ export function createTelegramMenuActionRuntime<
         getActiveModel: () => deps.getActiveModel(ctx),
         getThinkingLevel: deps.getThinkingLevel,
         getQueueItemCount: deps.getQueueItemCount,
-        sendStatusMenu: (
+        sendStatusMenu: async (
           state,
           statusHtml,
           activeModel,
           thinkingLevel,
           queueItemCount,
-        ) =>
-          sendTelegramStatusMessage(
+        ) => {
+          const messageId = await sendTelegramStatusMessage(
             state,
             statusHtml,
             activeModel,
@@ -681,7 +683,21 @@ export function createTelegramMenuActionRuntime<
             deps.sectionRegistry,
             deps.isVoiceReplyActive?.(),
             deps.getPendingCancellationCount?.() ?? 0,
-          ),
+          );
+          if (typeof messageId === "number") {
+            const key = state.chatId + ":" + (state.threadId ?? "main");
+            const previous = latestStatusMenuByTarget.get(key);
+            latestStatusMenuByTarget.set(key, messageId);
+            if (previous !== undefined && previous !== messageId) {
+              try {
+                await deps.deleteMessage?.(state.chatId, previous);
+              } catch {
+                // A previously deleted or expired menu must not block /start.
+              }
+            }
+          }
+          return messageId;
+        },
         storeModelMenuState: delivery.storeModelMenuState,
       });
     },
