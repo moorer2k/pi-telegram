@@ -1295,6 +1295,7 @@ export function registerTelegramLifecycleRuntimeHooks({
   modelContextAvailabilityRuntime,
   disconnectOnQuit,
   onSessionStarted,
+  onFinalTextDelivered,
   shutdownGenerativeAppLiveSurfaces,
   resolveAutomaticThreadCleanupEnabled,
   buttonActionStore,
@@ -1538,6 +1539,7 @@ export function registerTelegramLifecycleRuntimeHooks({
         cancel: reservation.cancel,
       };
     },
+    onFinalTextDelivered,
     preparePreviewDelivery,
     preparePreviewClear: previewRuntime.prepareClear,
     clearPreview: previewRuntime.clear,
