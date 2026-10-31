@@ -231,7 +231,8 @@ export function createTelegramQueueBindingRuntime<TContext>(deps: {
             ctx: TContext,
           ) => boolean;
           isItemReady: (item: Queue.TelegramQueueItem<TContext>) => boolean;
-          onPromptHandedOff?: (
+          onFinalTextDelivered?: (turn: { chatId: number; replyToMessageId?: number }) => void;
+  onPromptHandedOff?: (
             item: Pick<Queue.PendingTelegramTurn, "admissionReceipts">,
             ctx: TContext,
           ) => boolean;
