@@ -19,6 +19,7 @@ import * as Delivery from "./delivery.ts";
 import * as Inbound from "./inbound.ts";
 import * as Journal from "./journal.ts";
 import * as Lifecycle from "./lifecycle.ts";
+import { registerLiveTailConsumer } from "./live-tail-consumer.ts";
 import * as Locks from "./locks.ts";
 import * as Logging from "./logging.ts";
 import * as Media from "./media.ts";
@@ -3072,6 +3073,7 @@ export default function (pi: Pi.ExtensionAPI) {
   });
 
   // --- Lifecycle Hooks ---
+  let disposeLiveTail: (() => void) | undefined;
 
   Bindings.registerTelegramLifecycleRuntimeHooks({
     pi,
@@ -3100,6 +3102,8 @@ export default function (pi: Pi.ExtensionAPI) {
     resolveAutomaticThreadCleanupEnabled:
       configControls.resolveAutomaticThreadCleanupEnabled,
     onSessionStarted(_event, ctx) {
+      disposeLiveTail?.();
+      disposeLiveTail = process.env.PI_TELEGRAM_LIVE_TAIL === "1" ? registerLiveTailConsumer() : undefined;
       sessionActionAssembly.settlement.onSessionStart(ctx);
     },
     buttonActionStore,
