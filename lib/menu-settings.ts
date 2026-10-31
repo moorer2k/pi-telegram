@@ -48,6 +48,7 @@ export interface TelegramSettingsMutationDeps extends TelegramSettingsStateDeps 
   ) => Promise<void>;
   setActivityVerbosity: (verbosity: TelegramActivityVerbosity) => Promise<void>;
   setLiveTailSettings?: (patch: TelegramLiveTailSettings) => Promise<void>;
+  updateLiveTail?: () => Promise<string>;
   setVoiceReplyMode: (
     mode: TelegramVoiceReplyMode | undefined,
   ) => Promise<void>;
@@ -682,6 +683,7 @@ function liveTailSettingsMarkup(settings: TelegramLiveTailSettings): TelegramSet
     autoDelete: settings.autoDelete ?? "keep",
   };
   return { inline_keyboard: [
+    [{ text: "Update / Reload", callback_data: "settings:live-tail:update" }],
     [{ text: "Back", callback_data: "settings:list" }],
     ...options.flatMap(([key, label, values]) => [
       [{ text: label + ": " + current[key], callback_data: "settings:live-tail:noop" }],
@@ -832,6 +834,33 @@ export async function handleTelegramSettingsMenuCallbackAction(
   if (data === "settings:open:live-tail") {
     await updateLiveTailSettingsMessage(deps);
     await deps.answerCallbackQuery(callbackQueryId);
+    return true;
+  }
+  if (data === "settings:live-tail:update") {
+    await deps.updateSettingsMessage(
+      "<b>Update Live Tail</b>\nPull the configured branch, rebuild and restart the configured service. Requires a clean checkout.",
+      { inline_keyboard: [
+        [{ text: "Confirm update", callback_data: "settings:live-tail:confirm" }],
+        [{ text: "Cancel", callback_data: "settings:open:live-tail" }],
+      ] },
+    );
+    await deps.answerCallbackQuery(callbackQueryId);
+    return true;
+  }
+  if (data === "settings:live-tail:confirm") {
+    if (!deps.updateLiveTail) {
+      await deps.answerCallbackQuery(callbackQueryId, "Updater not configured");
+      return true;
+    }
+    await deps.answerCallbackQuery(callbackQueryId, "Starting update");
+    await deps.updateSettingsMessage("<b>Live Tail</b>\nUpdating...", { inline_keyboard: [] });
+    try {
+      const result = await deps.updateLiveTail();
+      await deps.updateSettingsMessage("<b>Live Tail</b>\n" + result, { inline_keyboard: [] });
+    } catch (error) {
+      const message = String(error).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+      await deps.updateSettingsMessage("<b>Update failed</b>\n" + message, { inline_keyboard: [[{ text: "Back", callback_data: "settings:open:live-tail" }]] });
+    }
     return true;
   }
   if (data.startsWith("settings:live-tail:")) {
@@ -1046,6 +1075,7 @@ export function createTelegramSettingsMenuRuntime<
     areDraftPreviewsEnabled: deps.areDraftPreviewsEnabled,
     getAssistantRenderingMode: deps.getAssistantRenderingMode,
     getActivityVerbosity: deps.getActivityVerbosity,
+    getLiveTailSettings: deps.getLiveTailSettings,
     getVoiceReplyMode: deps.getVoiceReplyMode,
     isVoiceReplyModeConfigured: deps.isVoiceReplyModeConfigured,
     getTimeInjectionMode: deps.getTimeInjectionMode,
@@ -1131,6 +1161,8 @@ export function createTelegramSettingsMenuRuntime<
         setDraftPreviewsEnabled: deps.setDraftPreviewsEnabled,
         setAssistantRenderingMode: deps.setAssistantRenderingMode,
         setActivityVerbosity: deps.setActivityVerbosity,
+        setLiveTailSettings: deps.setLiveTailSettings,
+        updateLiveTail: deps.updateLiveTail,
         setVoiceReplyMode: deps.setVoiceReplyMode,
         setTimeInjectionMode: deps.setTimeInjectionMode,
         setAutomaticThreadCleanupEnabled: deps.setAutomaticThreadCleanupEnabled,
