@@ -575,6 +575,14 @@ export async function handleTelegramMenuCallbackRuntime<
             updateModelMenuMessage: () =>
               deps.updateModelMenuMessage(state, ctx),
             updateStatusMessage: () => deps.updateStatusMessage(state, ctx),
+            confirmModelSelection: async (description) => {
+              if (!deps.editInteractiveMessage) {
+                await deps.updateModelMenuMessage(state, ctx);
+                return;
+              }
+              const safe = description.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+              await deps.editInteractiveMessage(state.chatId, state.messageId, "<b>Selection applied</b>\n" + safe, "html", { inline_keyboard: [] });
+            },
             answerCallbackQuery: deps.answerCallbackQuery,
             persistScopedModelPatterns: deps.persistScopedModelPatterns
               ? (patterns) => deps.persistScopedModelPatterns!(patterns, ctx)
