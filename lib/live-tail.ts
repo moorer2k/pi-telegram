@@ -24,10 +24,10 @@ export interface LiveTailSnapshot {
   updatedAt: number;
 }
 
-const MAX_REASONING = 900;
-const MAX_EARLIER = 1400;
-const MAX_PLAN = 700;
-const MAX_TOOLS = 12;
+const MAX_REASONING = 500;
+const MAX_EARLIER = 600;
+const MAX_PLAN = 400;
+const MAX_TOOLS = 8;
 
 function appendBounded(current: string, addition: string, limit: number): string {
   return (current + addition).slice(-limit);
@@ -62,7 +62,7 @@ export function createLiveTailProjection(activityId: string) {
         if (event.placement === "intermediate") snapshot.plan = event.text.slice(-MAX_PLAN);
         break;
       case "tool-start":
-        snapshot.tools.push({ id: event.toolCallId, name: event.toolName, startedAt: event.timestamp, state: "running" });
+        snapshot.tools.push({ id: event.toolCallId, name: event.toolName.slice(0, 70), startedAt: event.timestamp, state: "running" });
         if (snapshot.tools.length > MAX_TOOLS) snapshot.tools.splice(0, snapshot.tools.length - MAX_TOOLS);
         break;
       case "tool-end": {
