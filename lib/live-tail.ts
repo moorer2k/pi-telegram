@@ -111,5 +111,5 @@ export function renderLiveTail(snapshot: LiveTailSnapshot): string {
     }
   }
   parts.push("<b>Status</b>\n" + (snapshot.settled ? "Completed" : "Working"));
-  return parts.join("\n\n").slice(0, 3800);
+  return parts.join("\n\n");
 }
