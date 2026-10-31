@@ -6,6 +6,7 @@
 
 import type {
   TelegramActivityVerbosity,
+  type TelegramLiveTailSettings,
   TelegramAssistantRenderingMode,
   TelegramThreadDisplayMode,
   TelegramTimeMode,
@@ -32,6 +33,7 @@ export interface TelegramSettingsStateDeps {
   areDraftPreviewsEnabled: () => boolean;
   getAssistantRenderingMode: () => TelegramAssistantRenderingMode;
   getActivityVerbosity: () => TelegramActivityVerbosity;
+  getLiveTailSettings?: () => TelegramLiveTailSettings;
   getTimeInjectionMode: () => TelegramTimeMode;
   getVoiceReplyMode: () => TelegramVoiceReplyMode;
   isVoiceReplyModeConfigured: () => boolean;
@@ -45,6 +47,7 @@ export interface TelegramSettingsMutationDeps extends TelegramSettingsStateDeps 
     mode: TelegramAssistantRenderingMode,
   ) => Promise<void>;
   setActivityVerbosity: (verbosity: TelegramActivityVerbosity) => Promise<void>;
+  setLiveTailSettings?: (patch: TelegramLiveTailSettings) => Promise<void>;
   setVoiceReplyMode: (
     mode: TelegramVoiceReplyMode | undefined,
   ) => Promise<void>;
@@ -383,6 +386,7 @@ export function buildTelegramSettingsMenuReplyMarkup(
       text: `🔬 Activity: ${activityVerbosity}`,
       callback_data: "settings:open:activity-verbosity",
     },
+    { text: "Live Tail settings", callback_data: "settings:open:live-tail" },
     {
       text: `🕒 Time injection: ${getTelegramSettingsStateValueLabel(timeInjectionMode)}`,
       callback_data: "settings:open:time-injection",
@@ -592,6 +596,7 @@ type TelegramSettingsMenuValuePorts = Pick<
   | "isVoiceReplyModeConfigured"
   | "isAutomaticThreadCleanupEnabled"
   | "getActivityVerbosity"
+  | "getLiveTailSettings"
   | "getThreadDisplayMode"
   | "isThreadDisplayCustom"
 >;
@@ -655,6 +660,44 @@ async function updateAssistantRenderingSettingsMessage(
   await deps.updateSettingsMessage(
     buildAssistantRenderingSettingsText(mode),
     buildAssistantRenderingSettingsReplyMarkup(mode),
+  );
+}
+
+
+function liveTailSettingsMarkup(settings: TelegramLiveTailSettings): TelegramSettingsMenuReplyMarkup {
+  const options: Array<[string, string, readonly string[]]> = [
+    ["enabled", "Enabled", ["off", "on"]],
+    ["detail", "Detail", ["minimal", "standard", "detailed"]],
+    ["reasoning", "Reasoning", ["hidden", "collapsed", "expanded"]],
+    ["tools", "Tools", ["hidden", "active", "recent"]],
+    ["interval", "Refresh", ["1", "2", "3"]],
+    ["autoDelete", "Auto-delete", ["keep", "immediate", "5s", "15s", "30s", "60s"]],
+  ];
+  const current: Record<string, string> = {
+    enabled: settings.enabled ? "on" : "off",
+    detail: settings.detail ?? "standard",
+    reasoning: settings.reasoning ?? "collapsed",
+    tools: settings.tools ?? "recent",
+    interval: String(settings.interval ?? 2),
+    autoDelete: settings.autoDelete ?? "keep",
+  };
+  return { inline_keyboard: [
+    [{ text: "Back", callback_data: "settings:list" }],
+    ...options.flatMap(([key, label, values]) => [
+      [{ text: label + ": " + current[key], callback_data: "settings:live-tail:noop" }],
+      values.map(value => ({
+        text: (current[key] === value ? "✓ " : "") + value,
+        callback_data: "settings:live-tail:" + key + ":" + value,
+      })),
+    ]),
+  ] };
+}
+
+async function updateLiveTailSettingsMessage(deps: TelegramSettingsMenuCallbackDeps): Promise<void> {
+  const settings = deps.getLiveTailSettings?.() ?? {};
+  await deps.updateSettingsMessage(
+    "<b>Live Tail</b>\\nOne editable activity message. Final answers always arrive as a new message.\\nAuto-delete applies only to activity messages.",
+    liveTailSettingsMarkup(settings),
   );
 }
 
@@ -783,6 +826,28 @@ export async function handleTelegramSettingsMenuCallbackAction(
   }
   if (data === "settings:open:assistant-rendering") {
     await updateAssistantRenderingSettingsMessage(deps);
+    await deps.answerCallbackQuery(callbackQueryId);
+    return true;
+  }
+  if (data === "settings:open:live-tail") {
+    await updateLiveTailSettingsMessage(deps);
+    await deps.answerCallbackQuery(callbackQueryId);
+    return true;
+  }
+  if (data.startsWith("settings:live-tail:")) {
+    const [, , key, value] = data.split(":");
+    const allowed: Record<string, readonly string[]> = {
+      enabled: ["on", "off"], detail: ["minimal", "standard", "detailed"],
+      reasoning: ["hidden", "collapsed", "expanded"], tools: ["hidden", "active", "recent"],
+      interval: ["1", "2", "3"], autoDelete: ["keep", "immediate", "5s", "15s", "30s", "60s"],
+    };
+    if (allowed[key]?.includes(value) && deps.setLiveTailSettings) {
+      const parsed: TelegramLiveTailSettings = key === "enabled" ? { enabled: value === "on" }
+        : key === "interval" ? { interval: Number(value) as 1 | 2 | 3 }
+        : { [key]: value } as TelegramLiveTailSettings;
+      await deps.setLiveTailSettings(parsed);
+      await updateLiveTailSettingsMessage(deps);
+    }
     await deps.answerCallbackQuery(callbackQueryId);
     return true;
   }
