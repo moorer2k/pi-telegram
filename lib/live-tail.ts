@@ -10,6 +10,7 @@ import type { TelegramLiveTailSettings } from "./config.ts";
 export interface LiveTailTool {
   id: string;
   name: string;
+  command?: string;
   startedAt: number;
   elapsedMs?: number;
   state: "running" | "done" | "error";
@@ -28,7 +29,27 @@ export interface LiveTailSnapshot {
 const MAX_REASONING = 500;
 const MAX_EARLIER = 600;
 const MAX_PLAN = 400;
-const MAX_TOOLS = 8;
+const MAX_TOOLS = 12;
+
+/** Only surface an explicit command/path, never arbitrary serialized tool arguments.
+ * Reject credential-bearing or shell-environment assignments before showing a preview.
+ */
+function toolCommand(name: string, args: unknown): string | undefined {
+  if (!args || typeof args !== "object" || Array.isArray(args)) return undefined;
+  const data = args as Record<string, unknown>;
+  const candidates = /^(bash|terminal|exec|shell|command|run|ssh)$/i.test(name)
+    ? ["command", "cmd", "script"]
+    : /^(read_file|write_file|edit_file|read|write|edit|grep|find|ls|search)$/i.test(name)
+      ? ["path", "file_path", "filePath", "pattern", "query"]
+      : [];
+  const key = candidates.find(k => typeof data[k] === "string");
+  if (!key) return undefined;
+  const value = String(data[key]).replace(/[\r\n\t]+/g, " ").trim();
+  if (!value || /(?:password|passwd|secret|token|api[_-]?key|authorization|bearer|private[_-]?key|credential|--password|--token|--key|\.env(?:\b|\/))/i.test(value)) return undefined;
+  if (/(?:^|\s)[A-Za-z_][A-Za-z0-9_]*(?:PASSWORD|TOKEN|SECRET|KEY)\s*=/.test(value)) return undefined;
+  return value.length > 180 ? value.slice(0, 177) + "..." : value;
+}
+
 
 function appendBounded(current: string, addition: string, limit: number): string {
   return (current + addition).slice(-limit);
@@ -63,7 +84,7 @@ export function createLiveTailProjection(activityId: string) {
         if (event.placement === "intermediate") snapshot.plan = event.text.slice(-MAX_PLAN);
         break;
       case "tool-start":
-        snapshot.tools.push({ id: event.toolCallId, name: event.toolName.slice(0, 70), startedAt: event.timestamp, state: "running" });
+        snapshot.tools.push({ id: event.toolCallId, name: event.toolName.slice(0, 70), command: toolCommand(event.toolName, event.args), startedAt: event.timestamp, state: "running" });
         if (snapshot.tools.length > MAX_TOOLS) snapshot.tools.splice(0, snapshot.tools.length - MAX_TOOLS);
         break;
       case "tool-end": {
@@ -118,6 +139,8 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
     parts.push("<b>Plan</b>\n" + clean(snapshot.plan, detail === "detailed" ? 750 : 350));
   }
 
+  if (detail === "detailed") parts.unshift("<b>PI-BOLT // LIVE TERMINAL</b>");
+
   if (settings.tools !== "hidden" && snapshot.tools.length) {
     const all = snapshot.tools.filter(t => settings.tools !== "active" || t.state === "running");
     const max = detail === "minimal" ? 1 : detail === "detailed" ? 8 : 4;
@@ -125,7 +148,8 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
     const renderTool = (tool: LiveTailTool): string => {
       const status = tool.state === "running" ? "…" : tool.state === "done" ? "✓" : "×";
       const duration = tool.elapsedMs === undefined ? "" : " · " + (tool.elapsedMs / 1000).toFixed(1) + "s";
-      return status + " <code>" + clean(tool.name, 90) + "</code>" + duration;
+      const command = detail === "detailed" && tool.command ? " · <code>" + clean(tool.command, 180) + "</code>" : "";
+      return status + " <code>" + clean(tool.name, 70) + "</code>" + command + duration;
     };
     const active = selected.filter(t => t.state === "running");
     const finished = selected.filter(t => t.state !== "running");
