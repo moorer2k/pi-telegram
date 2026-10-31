@@ -757,8 +757,10 @@ export function createTelegramActivityBindingRuntime<TTransportStamp>(deps: {
     generation: deps.generation,
     captureDrain: deps.captureDrain,
     observeEvent(event) {
-      assistantOutputBinding.observeEvent(event);
-      activityVerbosityRuntime.accept(event);
+      if (process.env.PI_TELEGRAM_LIVE_TAIL !== "1") {
+        assistantOutputBinding.observeEvent(event);
+        activityVerbosityRuntime.accept(event);
+      }
     },
     recordFailure(handlerId, event, error) {
       deps.assistantOutput.recordRuntimeEvent("activity", error, {
