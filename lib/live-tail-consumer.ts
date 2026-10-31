@@ -134,7 +134,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
   });
 
   function scheduleAutoDelete(id: string, state: LiveTailState): void {
-    if (!state.settled || !state.finalDelivered || state.cleanup || closed) return;
+    if (!state.settled || !state.finalDelivered || state.cleanup || closed || state.pending) return;
     const delay: Record<string, number | undefined> = {
       keep: undefined, immediate: 0, "5s": 5000, "15s": 15000,
       "30s": 30000, "60s": 60000,
