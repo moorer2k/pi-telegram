@@ -42,6 +42,7 @@ import * as Replies from "./replies.ts";
 import * as Routing from "./routing.ts";
 import * as Runtime from "./runtime.ts";
 import * as Sections from "./sections.ts";
+import { updateTelegramCheckout } from "./self-update.ts";
 import * as Skills from "./skills.ts";
 import * as Status from "./status.ts";
 import * as Sync from "./sync.ts";
@@ -1208,6 +1209,7 @@ export default function (pi: Pi.ExtensionAPI) {
       sendInteractiveMessage,
       answerCallbackQuery,
       ...configControls,
+      updateLiveTail: updateTelegramCheckout,
       reviewInactiveThreads: inactiveThreadCleanupRuntime.review,
       cleanInactiveThreads: inactiveThreadCleanupRuntime.clean,
       getThreadDisplayMode() {
