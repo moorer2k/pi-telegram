@@ -122,6 +122,7 @@ export function buildThinkingMenuReplyMarkup(
     levelButtons.slice(1, 4),
     levelButtons.slice(4, 7),
   );
+  rows.push([{ text: "Close", callback_data: "menu:close" }]);
   return { inline_keyboard: rows };
 }
 
