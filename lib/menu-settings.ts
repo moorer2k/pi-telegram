@@ -667,40 +667,65 @@ async function updateAssistantRenderingSettingsMessage(
 
 
 function liveTailSettingsMarkup(settings: TelegramLiveTailSettings): TelegramSettingsMenuReplyMarkup {
-  const options: Array<[string, string, readonly string[]]> = [
-    ["enabled", "Enabled", ["off", "on"]],
-    ["detail", "Detail", ["minimal", "standard", "detailed"]],
-    ["reasoning", "Reasoning", ["hidden", "collapsed", "expanded"]],
-    ["tools", "Tools", ["hidden", "active", "recent"]],
-    ["interval", "Refresh", ["1", "2", "3"]],
-    ["autoDelete", "Auto-delete", ["keep", "immediate", "5s", "15s", "30s", "60s"]],
+  const enabled = settings.enabled !== false;
+  const detail = settings.detail ?? "standard";
+  const reasoning = settings.reasoning ?? "collapsed";
+  const tools = settings.tools ?? "recent";
+  const interval = String(settings.interval ?? 2);
+  const autoDelete = settings.autoDelete ?? "keep";
+  const rows: TelegramSettingsMenuReplyMarkup["inline_keyboard"] = [
+    [
+      { text: enabled ? "🟢 Live Tail ON" : "⚪ Live Tail OFF", callback_data: "settings:live-tail:enabled:" + (enabled ? "off" : "on") },
+      { text: "🔄 Reload", callback_data: "settings:live-tail:update" },
+    ],
+    [
+      { text: "📊 " + detail, callback_data: "settings:live-tail:choose:detail" },
+      { text: "🧠 " + reasoning, callback_data: "settings:live-tail:choose:reasoning" },
+    ],
+    [
+      { text: "🛠 " + tools, callback_data: "settings:live-tail:choose:tools" },
+      { text: "⏱ " + interval + "s", callback_data: "settings:live-tail:choose:interval" },
+    ],
+    [
+      { text: "🗑 Auto-delete: " + autoDelete, callback_data: "settings:live-tail:choose:autoDelete" },
+    ],
+    [
+      { text: "◀ Back", callback_data: "settings:list" },
+      { text: "✕ Close", callback_data: "menu:close" },
+    ],
   ];
-  const current: Record<string, string> = {
-    enabled: settings.enabled ? "on" : "off",
-    detail: settings.detail ?? "standard",
-    reasoning: settings.reasoning ?? "collapsed",
-    tools: settings.tools ?? "recent",
-    interval: String(settings.interval ?? 2),
-    autoDelete: settings.autoDelete ?? "keep",
-  };
-  return { inline_keyboard: [
-    [{ text: "Update / Reload", callback_data: "settings:live-tail:update" }],
-    [{ text: "Back", callback_data: "settings:list" }],
-    [{ text: "Close", callback_data: "menu:close" }],
-    ...options.flatMap(([key, label, values]) => [
-      [{ text: label + ": " + current[key], callback_data: "settings:live-tail:noop" }],
-      values.map(value => ({
-        text: (current[key] === value ? "✓ " : "") + value,
-        callback_data: "settings:live-tail:" + key + ":" + value,
-      })),
-    ]),
-  ] };
+  return { inline_keyboard: rows };
+}
+
+const LIVE_TAIL_CHOICES: Record<string, { title: string; icon: string; values: readonly string[] }> = {
+  detail: { title: "Detail", icon: "📊", values: ["minimal", "standard", "detailed"] },
+  reasoning: { title: "Reasoning", icon: "🧠", values: ["hidden", "collapsed", "expanded"] },
+  tools: { title: "Tools", icon: "🛠", values: ["hidden", "active", "recent"] },
+  interval: { title: "Refresh", icon: "⏱", values: ["1", "2", "3"] },
+  autoDelete: { title: "Auto-delete", icon: "🗑", values: ["keep", "immediate", "5s", "15s", "30s", "60s"] },
+};
+
+function liveTailChoiceMarkup(key: string, settings: TelegramLiveTailSettings): TelegramSettingsMenuReplyMarkup {
+  const choice = LIVE_TAIL_CHOICES[key];
+  const current = key === "interval" ? String(settings.interval ?? 2)
+    : key === "autoDelete" ? settings.autoDelete ?? "keep"
+    : key === "detail" ? settings.detail ?? "standard"
+    : key === "reasoning" ? settings.reasoning ?? "collapsed"
+    : settings.tools ?? "recent";
+  const buttons = choice.values.map(value => ({
+    text: (value === current ? "✓ " : "") + (key === "interval" ? value + "s" : value),
+    callback_data: "settings:live-tail:" + key + ":" + value,
+  }));
+  const rows: TelegramSettingsMenuReplyMarkup["inline_keyboard"] = [];
+  for (let i = 0; i < buttons.length; i += 3) rows.push(buttons.slice(i, i + 3));
+  rows.push([{ text: "◀ Live Tail", callback_data: "settings:open:live-tail" }, { text: "✕ Close", callback_data: "menu:close" }]);
+  return { inline_keyboard: rows };
 }
 
 async function updateLiveTailSettingsMessage(deps: TelegramSettingsMenuCallbackDeps): Promise<void> {
   const settings = deps.getLiveTailSettings?.() ?? {};
   await deps.updateSettingsMessage(
-    "<b>Live Tail</b>\nOne editable activity message. Final answers always arrive as a new message.\nAuto-delete applies only to activity messages.",
+    "<b>⚡ Live Tail</b>\nConfigure activity display. Select a category to edit.",
     liveTailSettingsMarkup(settings),
   );
 }
@@ -835,6 +860,20 @@ export async function handleTelegramSettingsMenuCallbackAction(
   }
   if (data === "settings:open:live-tail") {
     await updateLiveTailSettingsMessage(deps);
+    await deps.answerCallbackQuery(callbackQueryId);
+    return true;
+  }
+  if (data.startsWith("settings:live-tail:choose:")) {
+    const key = data.slice("settings:live-tail:choose:".length);
+    const choice = LIVE_TAIL_CHOICES[key];
+    if (!choice) {
+      await deps.answerCallbackQuery(callbackQueryId, "Unknown setting");
+      return true;
+    }
+    await deps.updateSettingsMessage(
+      "<b>" + choice.icon + " " + choice.title + "</b>\nChoose an option.",
+      liveTailChoiceMarkup(key, deps.getLiveTailSettings?.() ?? {}),
+    );
     await deps.answerCallbackQuery(callbackQueryId);
     return true;
   }
