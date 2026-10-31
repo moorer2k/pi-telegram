@@ -21,6 +21,7 @@ interface LiveTailState {
   dirty: boolean;
   failed: boolean;
   settled: boolean;
+  lastFlushStartedAt: number;
 }
 
 export function registerLiveTailConsumer() {
@@ -49,6 +50,7 @@ export function registerLiveTailConsumer() {
     const state = activities.get(id);
     if (!state || closed || state.pending || state.failed || !state.latest) return;
     state.pending = true;
+    state.lastFlushStartedAt = Date.now();
     state.dirty = false;
     try {
       const text = renderLiveTail(state.projection.getSnapshot());
@@ -94,7 +96,7 @@ export function registerLiveTailConsumer() {
         }
         state = {
           projection: createLiveTailProjection(event.activityId),
-          pending: false, dirty: false, failed: false, settled: false,
+          pending: false, dirty: false, failed: false, settled: false, lastFlushStartedAt: 0,
         };
         activities.set(event.activityId, state);
       }
@@ -104,7 +106,11 @@ export function registerLiveTailConsumer() {
       if (state.pending) {
         state.dirty = true;
       } else {
-        schedule(event.activityId, state.settled ? 0 : EDIT_INTERVAL_MS);
+        // Throttle rather than debounce: continuous token deltas must not postpone updates forever.
+        if (!state.timer || state.settled) {
+          const elapsed = Date.now() - state.lastFlushStartedAt;
+          schedule(event.activityId, state.settled ? 0 : Math.max(0, EDIT_INTERVAL_MS - elapsed));
+        }
       }
     },
   });
