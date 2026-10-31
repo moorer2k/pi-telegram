@@ -411,6 +411,17 @@ export async function handleTelegramMenuCallbackRuntime<
   ctx: TContext,
   deps: TelegramMenuCallbackRuntimeDeps<TContext, TModel>,
 ): Promise<void> {
+  if (query.data === "menu:close") {
+    const chatId = query.message?.chat?.id;
+    const messageId = query.message?.message_id;
+    if (typeof chatId === "number" && typeof messageId === "number" && deps.deleteMessage) {
+      await deps.answerCallbackQuery(query.id);
+      await deps.deleteMessage(chatId, messageId);
+    } else {
+      await deps.answerCallbackQuery(query.id, "Cannot close this menu");
+    }
+    return;
+  }
   if (query.data === "menu:back") {
     const state = deps.getStoredModelMenuState(
       query.message?.message_id,
