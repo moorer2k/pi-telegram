@@ -1009,6 +1009,7 @@ export default function (pi: Pi.ExtensionAPI) {
     publicationRuntime,
   } = Bindings.createTelegramActivityBindingRuntime({
     generation: deliveryGenerationSeed,
+    isLiveTailEnabled: () => configControls.getLiveTailSettings().enabled === true || process.env.PI_TELEGRAM_LIVE_TAIL === "1",
     captureDrain: captureCleanupDrain,
     assistantOutput: {
       prepareTelegramPreview: previewRuntime.preparePublication,
@@ -3110,7 +3111,7 @@ export default function (pi: Pi.ExtensionAPI) {
       configControls.resolveAutomaticThreadCleanupEnabled,
     onSessionStarted(_event, ctx) {
       disposeLiveTail?.();
-      disposeLiveTail = process.env.PI_TELEGRAM_LIVE_TAIL === "1" ? registerLiveTailConsumer() : undefined;
+      disposeLiveTail = (configControls.getLiveTailSettings().enabled === true || process.env.PI_TELEGRAM_LIVE_TAIL === "1") ? registerLiveTailConsumer() : undefined;
       sessionActionAssembly.settlement.onSessionStart(ctx);
     },
     buttonActionStore,
