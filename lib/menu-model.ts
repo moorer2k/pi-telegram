@@ -1128,6 +1128,7 @@ export function buildModelMenuReplyMarkup(
       },
     ]),
   );
+  rows.push([{ text: "Close", callback_data: "menu:close" }]);
   return { inline_keyboard: rows };
 }
 
@@ -1138,7 +1139,7 @@ function buildModelDetailMenuReplyMarkup(
   const selection = getTelegramSelectedDetailModel(state);
   if (selection.kind !== "selected") {
     return {
-      inline_keyboard: [
+      inline_keyboard: [[{ text: "Close", callback_data: "menu:close" }],
         [{ text: "⬆️ Back", callback_data: "model:pages:back" }],
       ],
     };
@@ -1208,6 +1209,7 @@ export function buildModelPageMenuReplyMarkup(
       ),
     );
   }
+  rows.push([{ text: "Close", callback_data: "menu:close" }]);
   return { inline_keyboard: rows };
 }
 
