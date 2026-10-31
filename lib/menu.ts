@@ -411,6 +411,17 @@ export async function handleTelegramMenuCallbackRuntime<
   ctx: TContext,
   deps: TelegramMenuCallbackRuntimeDeps<TContext, TModel>,
 ): Promise<void> {
+  if (query.data === "menu:close") {
+    const chatId = query.message?.chat?.id;
+    const messageId = query.message?.message_id;
+    if (typeof chatId === "number" && typeof messageId === "number" && deps.deleteMessage) {
+      await deps.answerCallbackQuery(query.id);
+      await deps.deleteMessage(chatId, messageId);
+    } else {
+      await deps.answerCallbackQuery(query.id, "Cannot close this menu");
+    }
+    return;
+  }
   if (query.data === "menu:back") {
     const state = deps.getStoredModelMenuState(
       query.message?.message_id,
@@ -452,8 +463,20 @@ export async function handleTelegramMenuCallbackRuntime<
               throw new Error("Rich Message delivery is unavailable");
             }),
           enqueuePrompt: deps.enqueueSectionPrompt
-            ? (prompt: string) =>
-                deps.enqueueSectionPrompt!(prompt, ctx, target, query)
+            ? async (prompt: string) => {
+                await deps.enqueueSectionPrompt!(prompt, ctx, target, query);
+                // The queued task gets its own response; retire the menu keyboard.
+                // Never mark a task completed merely because it was queued.
+                const summary = prompt.trim().replace(/\s+/g, " ").slice(0, 180);
+                const safe = summary.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                await deps.editInteractiveMessage?.(
+                  chatId,
+                  messageId,
+                  "<b>Task queued</b>\n" + safe,
+                  "html",
+                  { inline_keyboard: [] },
+                );
+              }
             : async () => {},
           deleteMessage: deps.deleteMessage ?? (async () => {}),
         };
@@ -552,6 +575,14 @@ export async function handleTelegramMenuCallbackRuntime<
             updateModelMenuMessage: () =>
               deps.updateModelMenuMessage(state, ctx),
             updateStatusMessage: () => deps.updateStatusMessage(state, ctx),
+            confirmModelSelection: async (description) => {
+              if (!deps.editInteractiveMessage) {
+                await deps.updateModelMenuMessage(state, ctx);
+                return;
+              }
+              const safe = description.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+              await deps.editInteractiveMessage(state.chatId, state.messageId, "<b>Selection applied</b>\n" + safe, "html", { inline_keyboard: [] });
+            },
             answerCallbackQuery: deps.answerCallbackQuery,
             persistScopedModelPatterns: deps.persistScopedModelPatterns
               ? (patterns) => deps.persistScopedModelPatterns!(patterns, ctx)
@@ -582,6 +613,8 @@ export async function handleTelegramMenuCallbackRuntime<
     answerCallbackQuery: deps.answerCallbackQuery,
   });
 }
+
+const latestStatusMenuByTarget = new Map<string, number>();
 
 export function createTelegramMenuActionRuntime<
   TContext,
@@ -638,14 +671,14 @@ export function createTelegramMenuActionRuntime<
         getActiveModel: () => deps.getActiveModel(ctx),
         getThinkingLevel: deps.getThinkingLevel,
         getQueueItemCount: deps.getQueueItemCount,
-        sendStatusMenu: (
+        sendStatusMenu: async (
           state,
           statusHtml,
           activeModel,
           thinkingLevel,
           queueItemCount,
-        ) =>
-          sendTelegramStatusMessage(
+        ) => {
+          const messageId = await sendTelegramStatusMessage(
             state,
             statusHtml,
             activeModel,
@@ -658,7 +691,21 @@ export function createTelegramMenuActionRuntime<
             deps.sectionRegistry,
             deps.isVoiceReplyActive?.(),
             deps.getPendingCancellationCount?.() ?? 0,
-          ),
+          );
+          if (typeof messageId === "number") {
+            const key = state.chatId + ":" + (state.threadId ?? "main");
+            const previous = latestStatusMenuByTarget.get(key);
+            latestStatusMenuByTarget.set(key, messageId);
+            if (previous !== undefined && previous !== messageId) {
+              try {
+                await deps.deleteMessage?.(state.chatId, previous);
+              } catch {
+                // A previously deleted or expired menu must not block /start.
+              }
+            }
+          }
+          return messageId;
+        },
         storeModelMenuState: delivery.storeModelMenuState,
       });
     },
