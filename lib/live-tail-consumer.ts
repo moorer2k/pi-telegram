@@ -85,6 +85,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
       if (state.dirty && !closed && !state.failed && !state.timer) {
         schedule(id, EDIT_INTERVAL_MS);
       }
+      if (state.settled && state.finalDelivered) scheduleAutoDelete(id, state);
       if (state.settled && !state.cleanup && !state.finalDelivered) {
         state.cleanup = setTimeout(() => clearState(id), RETAIN_SETTLED_MS);
       }
@@ -132,6 +133,21 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
     },
   });
 
+  function scheduleAutoDelete(id: string, state: LiveTailState): void {
+    if (!state.settled || !state.finalDelivered || state.cleanup || closed) return;
+    const delay: Record<string, number | undefined> = {
+      keep: undefined, immediate: 0, "5s": 5000, "15s": 15000,
+      "30s": 30000, "60s": 60000,
+    };
+    const ms = delay[getSettings().autoDelete ?? "keep"];
+    if (ms === undefined) return;
+    state.cleanup = setTimeout(() => {
+      if (closed || activities.get(id) !== state || !state.handle || !state.latest) return;
+      void state.latest.delete(state.handle).catch(() => {});
+      clearState(id);
+    }, ms);
+  }
+
   const disposeConsumer = () => {
     closed = true;
     dispose();
@@ -144,19 +160,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
       if (target?.kind !== "target" || target.target.chatId !== chatId ||
           state.replyToMessageId !== replyToMessageId || state.finalDelivered) continue;
       state.finalDelivered = true;
-      const delay: Record<string, number | undefined> = {
-        keep: undefined, immediate: 0, "5s": 5000, "15s": 15000,
-        "30s": 30000, "60s": 60000,
-      };
-      const ms = delay[getSettings().autoDelete ?? "keep"];
-      if (ms === undefined) continue;
-      if (state.cleanup) clearTimeout(state.cleanup);
-      state.cleanup = setTimeout(() => {
-        // Delete only the activity handle, never the separately delivered final answer.
-        if (closed || activities.get(id) !== state || !state.handle || !state.latest) return;
-        void state.latest.delete(state.handle).catch(() => {});
-        clearState(id);
-      }, ms);
+      scheduleAutoDelete(id, state);
     }
   };
   return { dispose: disposeConsumer, onFinalDelivered };
