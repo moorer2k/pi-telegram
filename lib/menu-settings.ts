@@ -6,7 +6,7 @@
 
 import type {
   TelegramActivityVerbosity,
-  type TelegramLiveTailSettings,
+  TelegramLiveTailSettings,
   TelegramAssistantRenderingMode,
   TelegramThreadDisplayMode,
   TelegramTimeMode,
