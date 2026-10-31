@@ -23,6 +23,7 @@ interface LiveTailState {
   settled: boolean;
   lastFlushStartedAt: number;
   retryNotBefore: number;
+  hasContent: boolean;
 }
 
 export function registerLiveTailConsumer() {
@@ -56,7 +57,8 @@ export function registerLiveTailConsumer() {
     state.dirty = false;
     try {
       const text = renderLiveTail(state.projection.getSnapshot());
-      if (text === state.lastText || text === "<b>Status</b>\nWorking") return;
+      // Do not emit a status-only message for turns without visible activity.
+      if (!state.hasContent || text === state.lastText) return;
       const view = { text, parseMode: "html" as const };
       const result = state.handle
         ? await state.latest.edit(state.handle, view)
@@ -99,13 +101,20 @@ export function registerLiveTailConsumer() {
         }
         state = {
           projection: createLiveTailProjection(event.activityId),
-          pending: false, dirty: false, failed: false, settled: false, lastFlushStartedAt: 0, retryNotBefore: 0,
+          pending: false, dirty: false, failed: false, settled: false, lastFlushStartedAt: 0, retryNotBefore: 0, hasContent: false,
         };
         activities.set(event.activityId, state);
       }
       if (!state.projection.accept(event)) return;
       state.latest = ctx;
-      if (event.type === "agent-settled") state.settled = true;
+      if ((event.type === "reasoning-delta" && event.delta.length > 0) ||
+          (event.type === "reasoning-end" && event.text.length > 0) ||
+          (event.type === "assistant-segment" && event.placement === "intermediate" && event.text.length > 0) ||
+          event.type === "tool-start") state.hasContent = true;
+      if (event.type === "agent-settled") {
+        state.settled = true;
+        if (!state.hasContent) { clearState(event.activityId); return; }
+      }
       if (state.pending) {
         state.dirty = true;
       } else {
