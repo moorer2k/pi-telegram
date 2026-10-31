@@ -19,7 +19,7 @@ import * as Delivery from "./delivery.ts";
 import * as Inbound from "./inbound.ts";
 import * as Journal from "./journal.ts";
 import * as Lifecycle from "./lifecycle.ts";
-import { registerLiveTailConsumer } from "./live-tail-consumer.ts";
+import { registerLiveTailConsumer, type LiveTailConsumer } from "./live-tail-consumer.ts";
 import * as Locks from "./locks.ts";
 import * as Logging from "./logging.ts";
 import * as Media from "./media.ts";
@@ -3074,7 +3074,7 @@ export default function (pi: Pi.ExtensionAPI) {
   });
 
   // --- Lifecycle Hooks ---
-  let disposeLiveTail: (() => void) | undefined;
+  let liveTailConsumer: LiveTailConsumer | undefined;
 
   Bindings.registerTelegramLifecycleRuntimeHooks({
     pi,
@@ -3085,8 +3085,8 @@ export default function (pi: Pi.ExtensionAPI) {
     activityRuntime: {
       ...activityRuntime,
       onSessionShutdown() {
-        disposeLiveTail?.();
-        disposeLiveTail = undefined;
+        liveTailConsumer?.dispose();
+        liveTailConsumer = undefined;
         activityRuntime.onSessionShutdown();
       },
     },
@@ -3109,6 +3109,9 @@ export default function (pi: Pi.ExtensionAPI) {
     shutdownGenerativeAppLiveSurfaces: generativeAppLiveSurfaceBinding.shutdown,
     resolveAutomaticThreadCleanupEnabled:
       configControls.resolveAutomaticThreadCleanupEnabled,
+    onFinalTextDelivered(turn) {
+      liveTailConsumer?.onFinalDelivered(turn.chatId, turn.replyToMessageId);
+    },
     onSessionStarted(_event, ctx) {
       disposeLiveTail?.();
       disposeLiveTail = (configControls.getLiveTailSettings().enabled === true || process.env.PI_TELEGRAM_LIVE_TAIL === "1") ? registerLiveTailConsumer() : undefined;
