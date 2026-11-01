@@ -98,6 +98,7 @@ export function createLiveTailProjection(activityId: string) {
   let reasoningIndex: number | undefined;
   let lastSequence = -1;
   const seenChildIds = new Set<string>();
+  const MAX_CHILD_HISTORY = 24;
   const endedChildIds = new Set<string>();
   const seenToolIds = new Set<string>();
   const finishedToolIds = new Set<string>();
@@ -180,9 +181,14 @@ export function createLiveTailProjection(activityId: string) {
         seenChildIds.add(event.workId);
         snapshot.totalChildWork++;
         snapshot.childWork.push({ id: event.workId, name: safeText(event.label, 70) || event.kind, kind: event.kind, parentToolCallId: event.parentToolCallId, startedAt: event.timestamp, state: "running" });
+        while (snapshot.childWork.filter(t => t.state !== "running").length > MAX_CHILD_HISTORY) {
+          const oldestFinished = snapshot.childWork.findIndex(t => t.state !== "running");
+          if (oldestFinished < 0) break;
+          snapshot.childWork.splice(oldestFinished, 1);
+        }
         if (snapshot.childWork.length > MAX_ACTIVE_TOOLS) {
-          const finishedIndex = snapshot.childWork.findIndex(t => t.state !== "running");
-          snapshot.childWork.splice(finishedIndex < 0 ? 0 : finishedIndex, 1);
+          const oldestFinished = snapshot.childWork.findIndex(t => t.state !== "running");
+          snapshot.childWork.splice(oldestFinished < 0 ? 0 : oldestFinished, 1);
         }
         break;
       }
@@ -201,6 +207,11 @@ export function createLiveTailProjection(activityId: string) {
           child.state = event.isError ? "error" : "done";
           child.elapsedMs = Math.max(0, event.timestamp - child.startedAt);
           child.result = event.result ? safeText(event.result, 120) : undefined;
+        }
+        while (snapshot.childWork.filter(t => t.state !== "running").length > MAX_CHILD_HISTORY) {
+          const oldestFinished = snapshot.childWork.findIndex(t => t.state !== "running");
+          if (oldestFinished < 0) break;
+          snapshot.childWork.splice(oldestFinished, 1);
         }
         break;
       }
