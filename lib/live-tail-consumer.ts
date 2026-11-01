@@ -37,6 +37,7 @@ interface LiveTailState {
   deliveryPendingDeletion: boolean;
   deliveryGeneration: number;
   editRetryDeadline?: number;
+  missingMessageRecoveries: number;
 }
 
 export interface LiveTailConsumer {
@@ -171,7 +172,19 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
         state.retryNotBefore = Date.now() + Math.max(EDIT_INTERVAL_MS, Math.min(120000, typeof result.retryAfterMs === "number" && Number.isFinite(result.retryAfterMs) ? result.retryAfterMs : 3000));
         if (state.settled) state.retryNotBefore = Math.min(state.retryNotBefore, state.editRetryDeadline);
         schedule(id, state.retryNotBefore - Date.now());
-      } else if (state.handle && (result.reason === "transport-retryable" || result.reason === "transport-failed" || result.reason === "commit-unknown") && state.editFailures < 3) {
+      } else if (state.handle && result.reason === "message-unavailable" && state.missingMessageRecoveries < 1 && state.deliveryTargetKey && state.latest.defaultScope.kind === "target") {
+        // Telegram confirms the old message is gone. Recreate once at the same
+        // authorized destination; never recreate after an ambiguous send.
+        state.missingMessageRecoveries++;
+        state.handle = undefined;
+        state.deliveredContext = undefined;
+        state.lastText = undefined;
+        state.initialSendAttempted = false;
+        state.editFailures = 0;
+        state.dirty = true;
+        state.retryNotBefore = Date.now() + EDIT_INTERVAL_MS;
+        schedule(id, EDIT_INTERVAL_MS);
+      } else if (state.handle && (result.reason === "transport-retryable" || result.reason === "commit-unknown") && state.editFailures < 3) {
         // Editing an acknowledged message is safe to retry: it cannot create duplicates.
         // Never apply this recovery path to an unacknowledged initial send.
         state.editFailures++;
@@ -264,6 +277,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
           lastActivityAt: Date.now(),
           deliveryGeneration: 0,
           deliveryPendingDeletion: false,
+          missingMessageRecoveries: 0,
         };
         activities.set(event.activityId, state);
       }
