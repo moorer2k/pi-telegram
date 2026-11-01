@@ -315,8 +315,15 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
   }
   if (settings.tools !== "hidden" && (snapshot.totalChildWork > 0)) {
     const childStatus = "<b>CHILD WORK</b>\n" + snapshot.completedChildWork + " done / " + childActiveCount + " active" + (snapshot.failedChildWork ? " / " + snapshot.failedChildWork + " errors" : "") + (snapshot.interruptedChildWork ? " / " + snapshot.interruptedChildWork + " interrupted" : "");
-    const visibleChildren = activeChildren.slice(-3).map(t => line(t, true));
+    const visibleChildren = activeChildren.slice(-3).map(t => line(t, false));
     add(childStatus + (visibleChildren.length ? "\n" + visibleChildren.join("\n") : "") + (hiddenChildren ? "\n+" + hiddenChildren + " other active child jobs" : ""));
+  }
+  if (settings.tools !== "hidden" && settings.tools !== "active" && detail !== "minimal") {
+    const finishedChildren = snapshot.childWork.filter(t => t.state !== "running");
+    if (finishedChildren.length) {
+      const recentChildren = finishedChildren.slice(-(detail === "detailed" ? 4 : 2));
+      add("<b>RECENT CHILD WORK</b>\n" + recentChildren.map(t => line(t, detail !== "detailed")).join("\n"));
+    }
   }
   if (!snapshot.settled && detail !== "minimal" && settings.tools !== "hidden" && jobs.length > 2) add("<b>ONGOING TASKS</b>\n" + jobs.slice(-4).map(t => safeClean(t.name, 50) || "tool").join("\n"));
   if (detail !== "minimal" && snapshot.plan) {
