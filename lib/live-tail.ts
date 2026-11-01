@@ -148,37 +148,37 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
   const line = (tool: LiveTailTool, compact = false) => {
     const status = tool.state === "running" ? "[RUN]" : tool.state === "error" ? "[ERR]" : "[OK]";
     const command = tool.command ? " " + clean(tool.command, compact ? 90 : 160) : "";
-    const update = !compact && tool.update ? "\\n" + clean(tool.update, 90) : "";
+    const update = !compact && tool.update ? "\n" + clean(tool.update, 90) : "";
     const duration = tool.elapsedMs === undefined ? "" : " (" + (tool.elapsedMs / 1000).toFixed(1) + "s)";
     return status + " <code>" + clean(tool.name, 50) + command + "</code>" + duration + update;
   };
   if (detail === "detailed") add("<b>VENOM // LIVE TAIL</b>");
   if (active.length) {
     const current = active.slice(-2);
-    add("<b>ACTIVE OPERATIONS</b>\\n" + current.map(t => line(t)).join("\\n"));
+    add("<b>ACTIVE OPERATIONS</b>\n" + current.map(t => line(t)).join("\n"));
   } else {
-    add("<b>CURRENT STATUS</b>\\n" + (snapshot.settled ? "Completed" : "Working"));
+    add("<b>CURRENT STATUS</b>\n" + (snapshot.settled ? "Completed" : "Working"));
   }
   if (detail !== "minimal" && snapshot.plan) {
-    add("<b>CURRENT TASK</b>\\n" + clean(snapshot.plan.slice(-200), 200));
+    add("<b>CURRENT TASK</b>\n" + clean(snapshot.plan.slice(-200), 200));
   }
   if (settings.tools !== "hidden" && settings.tools !== "active" && finished.length) {
     const recent = finished.slice(-(detail === "detailed" ? 5 : 2));
-    add("<b>RECENT OPERATIONS</b>\\n" + recent.slice(-2).map(t => line(t, true)).join("\\n"));
+    add("<b>RECENT OPERATIONS</b>\n" + recent.slice(-2).map(t => line(t, true)).join("\n"));
     if (detail === "detailed" && finished.length > 2) {
       const history = finished.slice(-12, -2);
-      if (history.length) add("<i>Earlier operations (" + history.length + ")</i>\\n" + expandable(history.map(t => line(t, true)).join("\\n")));
+      if (history.length) add("<i>Earlier operations (" + history.length + ")</i>\n" + expandable(history.map(t => line(t, true)).join("\n")));
     }
   }
   const done = finished.filter(t => t.state === "done").length;
   const errors = finished.length - done;
-  add("<b>STATUS</b>\\n" + done + " done / " + active.length + " active" + (errors ? " / " + errors + " errors" : ""));
+  add("<b>STATUS</b>\n" + done + " done / " + active.length + " active" + (errors ? " / " + errors + " errors" : ""));
   if (reasoningMode !== "hidden" && snapshot.reasoning && detail !== "minimal") {
     const summary = clean(snapshot.reasoning.slice(-240), 240);
-    add("<b>REASONING</b>\\n" + (reasoningMode === "expanded" ? summary : expandable(summary)));
+    add("<b>REASONING</b>\n" + (reasoningMode === "expanded" ? summary : expandable(summary)));
   }
   if (reasoningMode !== "hidden" && detail === "detailed" && snapshot.earlierReasoning) {
-    add("<i>Earlier reasoning</i>\\n" + expandable(clean(snapshot.earlierReasoning.slice(-350), 350)));
+    add("<i>Earlier reasoning</i>\n" + expandable(clean(snapshot.earlierReasoning.slice(-350), 350)));
   }
-  return parts.join("\\n\\n");
+  return parts.join("\n\n");
 }
