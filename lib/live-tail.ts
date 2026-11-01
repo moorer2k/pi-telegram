@@ -26,6 +26,8 @@ export interface LiveTailSnapshot {
   plan: string;
   tools: LiveTailTool[];
   settled: boolean;
+  phase: "running" | "compacting" | "awaiting-input" | "finished";
+  prompt?: string;
   updatedAt: number;
   startedAt: number;
   totalTools: number;
@@ -78,7 +80,7 @@ function appendBounded(current: string, addition: string, limit: number): string
 export function createLiveTailProjection(activityId: string) {
   const snapshot: LiveTailSnapshot = {
     activityId, reasoning: "", earlierReasoning: "", plan: "",
-    tools: [], settled: false, updatedAt: 0, startedAt: 0, totalTools: 0, completedTools: 0, failedTools: 0,
+    tools: [], settled: false, phase: "running", updatedAt: 0, startedAt: 0, totalTools: 0, completedTools: 0, failedTools: 0,
   };
   let reasoningIndex: number | undefined;
   let lastSequence = -1;
@@ -128,7 +130,22 @@ export function createLiveTailProjection(activityId: string) {
         }
         break;
       }
+      case "compaction-start":
+        snapshot.phase = "compacting";
+        break;
+      case "compaction-end":
+        snapshot.phase = "running";
+        break;
+      case "ui-prompt-start":
+        snapshot.phase = "awaiting-input";
+        snapshot.prompt = event.title?.slice(0, 120) ?? event.kind;
+        break;
+      case "ui-prompt-end":
+        snapshot.phase = "running";
+        snapshot.prompt = undefined;
+        break;
       case "agent-settled":
+        snapshot.phase = "finished";
         snapshot.settled = true;
         for (const tool of snapshot.tools) {
           if (tool.state === "running") {
@@ -187,6 +204,8 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
     return status + " <code>" + clean(tool.name, 50) + command + "</code>" + duration + update + result;
   };
   if (detail === "detailed") add("<b>VENOM // LIVE TAIL</b>");
+  if (snapshot.phase === "compacting") add("<b>SESSION</b>\nCompacting context");
+  if (snapshot.phase === "awaiting-input") add("<b>AWAITING INPUT</b>\n" + clean(snapshot.prompt ?? "User input", 120));
   if (active.length && settings.tools !== "hidden") {
     const current = active.slice(-2);
     add("<b>ACTIVE OPERATIONS</b>\n" + current.map(t => line(t)).join("\n"));
