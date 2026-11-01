@@ -39,6 +39,7 @@ const MAX_REASONING = 360;
 const MAX_EARLIER = 600;
 const MAX_PLAN = 400;
 const MAX_TOOLS = 24;
+const MAX_ACTIVE_TOOLS = 64;
 
 /** Only explicit, bounded display fields are allowed. Suppress likely secrets. */
 function safePreview(value: unknown, max = 160): string | undefined {
@@ -113,6 +114,10 @@ export function createLiveTailProjection(activityId: string) {
         if (snapshot.tools.length > MAX_TOOLS) {
           const finishedIndex = snapshot.tools.findIndex(t => t.state !== "running");
           if (finishedIndex >= 0) snapshot.tools.splice(finishedIndex, 1);
+        }
+        if (snapshot.tools.length > MAX_ACTIVE_TOOLS) {
+          // Bound pathological concurrency without misreporting an evicted tool as completed.
+          snapshot.tools.shift();
         }
         break;
       case "tool-update": {
@@ -193,6 +198,7 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
   const expandable = (value: string) => "<blockquote expandable>" + value + "</blockquote>";
   const tools = snapshot.tools;
   const active = tools.filter(t => t.state === "running");
+  const activeCount = Math.max(0, snapshot.totalTools - snapshot.completedTools - snapshot.failedTools);
   const jobs = active.filter(t => t.kind === "subagent" || t.kind === "background" || t.kind === "task");
   const finished = tools.filter(t => t.state !== "running");
   const line = (tool: LiveTailTool, compact = false) => {
@@ -226,7 +232,7 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
   }
   const done = snapshot.completedTools;
   const errors = snapshot.failedTools;
-  add("<b>STATUS</b>\n" + done + " done / " + active.length + " active" + (errors ? " / " + errors + " errors" : "") + " / " + Math.floor(Math.max(0, snapshot.updatedAt - snapshot.startedAt) / 1000) + "s");
+  add("<b>STATUS</b>\n" + done + " done / " + activeCount + " active" + (errors ? " / " + errors + " errors" : "") + " / " + Math.floor(Math.max(0, snapshot.updatedAt - snapshot.startedAt) / 1000) + "s");
   if (reasoningMode !== "hidden" && snapshot.reasoning && detail !== "minimal") {
     const summary = clean(snapshot.reasoning.slice(-240), 240);
     add("<b>REASONING</b>\n" + (reasoningMode === "expanded" ? summary : expandable(summary)));
