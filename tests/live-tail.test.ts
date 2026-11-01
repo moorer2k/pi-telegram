@@ -361,3 +361,34 @@ test("normal short commands remain visible after opaque-value filtering", () => 
   tail.accept({activityId:"short-command",source:"telegram",timestamp:1,sequence:1,type:"tool-start",toolCallId:"a",toolName:"terminal",args:{command:"git status --short"}});
   assert.match(renderLiveTail(tail.getSnapshot()), /git status --short/);
 });
+
+test("reasoning redaction survives later deltas in the same segment", () => {
+  const tail = createLiveTailProjection("reasoning-suppressed");
+  tail.accept({activityId:"reasoning-suppressed",source:"telegram",timestamp:1,sequence:1,type:"reasoning-delta",contentIndex:0,delta:"Bearer secret123"});
+  tail.accept({activityId:"reasoning-suppressed",source:"telegram",timestamp:2,sequence:2,type:"reasoning-delta",contentIndex:0,delta:" continuation"});
+  assert.equal(tail.getSnapshot().reasoning, "");
+  assert.doesNotMatch(renderLiveTail(tail.getSnapshot(), {reasoning:"expanded"}), /continuation|secret123/);
+  tail.accept({activityId:"reasoning-suppressed",source:"telegram",timestamp:3,sequence:3,type:"reasoning-delta",contentIndex:1,delta:"New safe reasoning"});
+  assert.equal(tail.getSnapshot().reasoning, "New safe reasoning");
+});
+
+test("renderer revalidates tool previews in externally supplied snapshots", () => {
+  const tail = createLiveTailProjection("render-revalidation");
+  tail.accept({activityId:"render-revalidation",source:"telegram",timestamp:1,sequence:1,type:"tool-start",toolCallId:"a",toolName:"terminal",args:{}});
+  const state = tail.getSnapshot();
+  state.tools[0]!.command = "curl --token exposed-value";
+  state.tools[0]!.update = "Authorization: exposed-value";
+  state.tools[0]!.result = "password=exposed-value";
+  const output = renderLiveTail(state, {detail:"detailed"});
+  assert.doesNotMatch(output, /exposed-value/);
+});
+
+test("renderer screens sensitive plan and reasoning in snapshots", () => {
+  const tail = createLiveTailProjection("render-plan");
+  const state = tail.getSnapshot();
+  state.plan = "password=exposed";
+  state.reasoning = "Bearer exposed";
+  state.earlierReasoning = "api_key=exposed";
+  const output = renderLiveTail(state, {detail:"detailed",reasoning:"expanded"});
+  assert.doesNotMatch(output, /exposed/);
+});
