@@ -31,6 +31,8 @@ export interface LiveTailSnapshot {
   completedChildWork: number;
   failedChildWork: number;
   interruptedChildWork: number;
+  subagentWorkTotal: number;
+  backgroundWorkTotal: number;
   settled: boolean;
   phase: "running" | "compacting" | "awaiting-input" | "finished";
   prompt?: string;
@@ -93,12 +95,11 @@ function appendBounded(current: string, addition: string, limit: number): string
 export function createLiveTailProjection(activityId: string) {
   const snapshot: LiveTailSnapshot = {
     activityId, reasoning: "", earlierReasoning: "", plan: "",
-    tools: [], childWork: [], totalChildWork: 0, completedChildWork: 0, failedChildWork: 0, interruptedChildWork: 0, settled: false, phase: "running", updatedAt: 0, startedAt: 0, totalTools: 0, completedTools: 0, failedTools: 0, interruptedTools: 0,
+    tools: [], childWork: [], totalChildWork: 0, completedChildWork: 0, failedChildWork: 0, interruptedChildWork: 0, subagentWorkTotal: 0, backgroundWorkTotal: 0, settled: false, phase: "running", updatedAt: 0, startedAt: 0, totalTools: 0, completedTools: 0, failedTools: 0, interruptedTools: 0,
   };
   let reasoningIndex: number | undefined;
   let lastSequence = -1;
   const seenChildIds = new Set<string>();
-  const childKindTotals = { subagent: 0, background: 0 };
   const MAX_CHILD_HISTORY = 24;
   const endedChildIds = new Set<string>();
   const seenToolIds = new Set<string>();
@@ -181,7 +182,8 @@ export function createLiveTailProjection(activityId: string) {
         if (!event.workId || seenChildIds.has(event.workId)) break;
         seenChildIds.add(event.workId);
         snapshot.totalChildWork++;
-        childKindTotals[event.kind]++;
+        if (event.kind === "subagent") snapshot.subagentWorkTotal++;
+        else snapshot.backgroundWorkTotal++;
         snapshot.childWork.push({ id: event.workId, name: safeText(event.label, 70) || event.kind, kind: event.kind, parentToolCallId: event.parentToolCallId, startedAt: event.timestamp, state: "running" });
         let finishedChildren = snapshot.childWork.reduce((count, child) => count + (child.state !== "running" ? 1 : 0), 0);
         while (finishedChildren > MAX_CHILD_HISTORY) {
