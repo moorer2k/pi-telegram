@@ -30,6 +30,7 @@ interface LiveTailState {
   revision: number;
   cleanupDeadline?: number;
   editFailures: number;
+  lastEditAttemptRevision: number;
 }
 
 export interface LiveTailConsumer {
@@ -88,6 +89,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
         return;
       }
       const view = { text, parseMode: "html" as const };
+      state.lastEditAttemptRevision = sentRevision;
       const result = state.handle
         ? await state.latest.edit(state.handle, view)
         : await state.latest.send(view, { replyToMessageId: state.replyToMessageId });
@@ -171,6 +173,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
           replyToMessageId: event.replyToMessageId,
           revision: 0,
           editFailures: 0,
+          lastEditAttemptRevision: -1,
         };
         activities.set(event.activityId, state);
       }
