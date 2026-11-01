@@ -295,6 +295,11 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
   const activeChildren = snapshot.childWork.filter(t => t.state === "running");
   const childActiveCount = Math.max(0, snapshot.totalChildWork - snapshot.completedChildWork - snapshot.failedChildWork - snapshot.interruptedChildWork);
   const hiddenChildren = Math.max(0, childActiveCount - activeChildren.length);
+  const childKinds = { subagent: 0, background: 0 };
+  for (const child of activeChildren) {
+    if (child.kind === "subagent") childKinds.subagent++;
+    else if (child.kind === "background") childKinds.background++;
+  }
   const finished = tools.filter(t => t.state !== "running");
   const line = (tool: LiveTailTool, compact = false) => {
     const status = tool.state === "running" ? "[RUN]" : tool.state === "error" ? "[ERR]" : tool.state === "interrupted" ? "[STOP]" : "[OK]";
@@ -314,7 +319,7 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
     add("<b>CURRENT STATUS</b>\n" + phaseStatus);
   }
   if (settings.tools !== "hidden" && (snapshot.totalChildWork > 0)) {
-    const childStatus = "<b>CHILD WORK</b>\n" + snapshot.completedChildWork + " done / " + childActiveCount + " active" + (snapshot.failedChildWork ? " / " + snapshot.failedChildWork + " errors" : "") + (snapshot.interruptedChildWork ? " / " + snapshot.interruptedChildWork + " interrupted" : "");
+    const childStatus = "<b>CHILD WORK</b>\n" + snapshot.completedChildWork + " done / " + childActiveCount + " active" + (childKinds.subagent ? " / " + childKinds.subagent + " subagents" : "") + (childKinds.background ? " / " + childKinds.background + " background" : "") + (snapshot.failedChildWork ? " / " + snapshot.failedChildWork + " errors" : "") + (snapshot.interruptedChildWork ? " / " + snapshot.interruptedChildWork + " interrupted" : "");
     const visibleChildren = activeChildren.slice(-3).map(t => line(t, false));
     add(childStatus + (visibleChildren.length ? "\n" + visibleChildren.join("\n") : "") + (hiddenChildren ? "\n+" + hiddenChildren + " other active child jobs" : ""));
   }
