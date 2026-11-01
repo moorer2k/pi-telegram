@@ -74,7 +74,16 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
       scheduleAutoDelete(id, state);
     } else if (!state.cleanup) {
       state.cleanupDeadline ??= Date.now() + RETAIN_SETTLED_MS;
-      state.cleanup = setTimeout(() => clearState(id), Math.max(0, state.cleanupDeadline - Date.now()));
+      state.cleanup = setTimeout(() => {
+        if (activities.get(id) !== state) return;
+        if (state.pending || state.deliveryPendingDeletion) {
+          state.cleanup = undefined;
+          state.cleanupDeadline = Date.now() + RETAIN_SETTLED_MS;
+          retireFailedActivity(id, state);
+          return;
+        }
+        clearState(id);
+      }, Math.max(0, state.cleanupDeadline - Date.now()));
     }
   }
 
