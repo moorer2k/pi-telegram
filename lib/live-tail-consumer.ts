@@ -256,10 +256,13 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
   };
   const onFinalDelivered = (chatId: number, replyToMessageId: number | undefined) => {
     if (closed) return;
-    for (const [id, state] of activities) {
+    const candidates = [...activities.entries()].filter(([, state]) => {
       const target = state.handle?.target ?? (state.latest?.defaultScope.kind === "target" ? state.latest.defaultScope.target : undefined);
-      if (!target || target.chatId !== chatId ||
-          state.replyToMessageId !== replyToMessageId || state.finalDelivered) continue;
+      return target?.chatId === chatId && state.replyToMessageId === replyToMessageId && !state.finalDelivered;
+    });
+    // Without an original message ID, multiple turns in one chat are ambiguous.
+    if (replyToMessageId === undefined && candidates.length !== 1) return;
+    for (const [id, state] of candidates) {
       state.finalDelivered = true;
       if (state.cleanup) { clearTimeout(state.cleanup); state.cleanup = undefined; }
       state.cleanupDeadline = undefined;
