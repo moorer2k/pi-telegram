@@ -1742,9 +1742,13 @@ export function registerTelegramLifecycleRuntimeHooks({
       activityRuntime.onAgentStart(turn?.target, turn?.replyToMessageId);
       startAgentActivityTypingLoop(ctx);
     },
+    // Explicit signals emitted by cooperating subagent/background tools.
+    // Ordinary tool names and output text never create synthetic child jobs.
     async onToolExecutionStart(event, ctx) {
       if (!isSessionContextActive(ctx)) return;
       agentLifecycleHooks.onToolExecutionStart();
+      const childSignal = Activity.readTelegramChildWorkSignal(event.args);
+      if (childSignal?.phase === "start") activityRuntime.onChildWorkStart({ workId: childSignal.workId, kind: childSignal.kind, label: childSignal.label, parentToolCallId: event.toolCallId });
       activityRuntime.onToolStart({
         toolCallId: event.toolCallId,
         toolName: event.toolName,
@@ -1753,6 +1757,10 @@ export function registerTelegramLifecycleRuntimeHooks({
     },
     onToolExecutionUpdate(event, ctx) {
       if (!isSessionContextActive(ctx)) return;
+      const childSignal = Activity.readTelegramChildWorkSignal(event.partialResult);
+      if (childSignal?.phase === "start") activityRuntime.onChildWorkStart({ workId: childSignal.workId, kind: childSignal.kind, label: childSignal.label, parentToolCallId: event.toolCallId });
+      else if (childSignal?.phase === "update") activityRuntime.onChildWorkUpdate({ workId: childSignal.workId, message: childSignal.message });
+      else if (childSignal?.phase === "end") activityRuntime.onChildWorkEnd({ workId: childSignal.workId, isError: childSignal.isError, result: childSignal.result });
       activityRuntime.onToolUpdate({
         toolCallId: event.toolCallId,
         toolName: event.toolName,
@@ -1761,6 +1769,10 @@ export function registerTelegramLifecycleRuntimeHooks({
     },
     async onToolExecutionEnd(event, ctx) {
       if (!isSessionContextActive(ctx)) return;
+      const childSignal = Activity.readTelegramChildWorkSignal(event.result);
+      if (childSignal?.phase === "start") activityRuntime.onChildWorkStart({ workId: childSignal.workId, kind: childSignal.kind, label: childSignal.label, parentToolCallId: event.toolCallId });
+      else if (childSignal?.phase === "update") activityRuntime.onChildWorkUpdate({ workId: childSignal.workId, message: childSignal.message });
+      else if (childSignal?.phase === "end") activityRuntime.onChildWorkEnd({ workId: childSignal.workId, isError: childSignal.isError, result: childSignal.result });
       activityRuntime.onToolEnd({
         toolCallId: event.toolCallId,
         toolName: event.toolName,
