@@ -52,7 +52,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
   function schedule(id: string, delay: number): void {
     const state = activities.get(id);
     if (!state || closed || state.failed) return;
-    if (state.cleanup) { clearTimeout(state.cleanup); state.cleanup = undefined; state.cleanupDeadline = undefined; }
+    if (state.cleanup) { clearTimeout(state.cleanup); state.cleanup = undefined; }
     delay = Math.max(0, Number.isFinite(delay) ? delay : EDIT_INTERVAL_MS, state.retryNotBefore - Date.now());
     if (state.timer) clearTimeout(state.timer);
     state.timer = setTimeout(() => {
@@ -210,7 +210,12 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
     state.cleanupDeadline ??= Date.now() + ms;
     state.cleanup = setTimeout(() => {
       if (closed || activities.get(id) !== state) return;
-      if (state.pending || state.timer || state.dirty) { state.cleanup = undefined; scheduleAutoDelete(id, state); return; }
+      if (state.pending || state.timer || state.dirty) {
+        state.cleanup = undefined;
+        // Wait for the active edit to finish; its finally block re-arms deletion.
+        if (!state.pending && !state.timer && !state.dirty) scheduleAutoDelete(id, state);
+        return;
+      }
       if (state.handle && state.latest) void state.latest.delete(state.handle).catch(() => {});
       clearState(id);
     }, Math.max(0, state.cleanupDeadline - Date.now()));
