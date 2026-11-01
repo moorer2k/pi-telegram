@@ -200,6 +200,11 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
         clearState(event.activityId);
         return;
       }
+      if (state.deliveryTargetKey && !targetKey && ctx.defaultScope.kind !== "target") {
+        // A previously targeted activity must not fall back to a mutable active turn.
+        clearState(event.activityId);
+        return;
+      }
       if (targetKey) state.deliveryTargetKey = targetKey;
       state.latest = ctx;
       if ((event.type === "reasoning-delta" && event.delta.length > 0) ||
