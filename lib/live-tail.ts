@@ -108,6 +108,9 @@ export function createLiveTailProjection(activityId: string) {
         snapshot.reasoning = appendBounded(snapshot.reasoning, event.delta, MAX_REASONING);
         break;
       case "reasoning-end":
+        if (reasoningIndex !== undefined && reasoningIndex !== event.contentIndex && snapshot.reasoning) {
+          snapshot.earlierReasoning = appendBounded(snapshot.earlierReasoning, snapshot.reasoning + "\n", MAX_EARLIER);
+        }
         reasoningIndex = event.contentIndex;
         snapshot.reasoning = event.text.slice(-MAX_REASONING);
         break;
@@ -150,6 +153,7 @@ export function createLiveTailProjection(activityId: string) {
       }
       case "compaction-start":
         snapshot.phase = "compacting";
+        snapshot.prompt = undefined;
         break;
       case "compaction-end":
         snapshot.phase = "running";
@@ -164,6 +168,7 @@ export function createLiveTailProjection(activityId: string) {
         break;
       case "agent-settled":
         snapshot.phase = "finished";
+        snapshot.prompt = undefined;
         snapshot.settled = true;
         for (const tool of snapshot.tools) {
           if (tool.state === "running") {
@@ -213,6 +218,8 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
   const clean = (value: string, max: number) => escapeTelegramHtml(value.slice(0, max));
   const safeDuration = (ms: number) => Number.isFinite(ms) && ms >= 0 ? (ms / 1000).toFixed(1) + "s" : "0.0s";
   const expandable = (value: string) => "<blockquote expandable>" + value + "</blockquote>";
+  const phaseStatus = snapshot.settled ? (snapshot.failedTools ? "Finished with errors" : snapshot.interruptedTools ? "Interrupted" : "Completed")
+    : snapshot.phase === "awaiting-input" ? "Awaiting input" : snapshot.phase === "compacting" ? "Compacting context" : "Working";
   const tools = snapshot.tools;
   const active = tools.filter(t => t.state === "running");
   const activeCount = Math.max(0, snapshot.totalTools - snapshot.completedTools - snapshot.failedTools - snapshot.interruptedTools);
@@ -223,7 +230,7 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
     const command = tool.command ? " " + clean(tool.command, compact ? 90 : 160) : "";
     const update = !compact && tool.update ? "\n" + clean(tool.update, 90) : "";
     const duration = tool.elapsedMs === undefined ? "" : " (" + safeDuration(tool.elapsedMs) + ")";
-    const result = !compact && tool.state === "error" && tool.result ? "\n" + clean(tool.result, 90) : "";
+    const result = !compact && tool.state !== "running" && tool.result ? "\n" + clean(tool.result, 90) : "";
     return status + " <code>" + clean(tool.name, 50) + command + "</code>" + duration + update + result;
   };
   if (detail === "detailed") add("<b>VENOM // LIVE TAIL</b>");
@@ -233,7 +240,7 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
     const current = active.slice(-2);
     add("<b>ACTIVE OPERATIONS</b>\n" + current.map(t => line(t)).join("\n"));
   } else {
-    add("<b>CURRENT STATUS</b>\n" + (snapshot.settled ? "Completed" : "Working"));
+    add("<b>CURRENT STATUS</b>\n" + phaseStatus);
   }
   if (detail !== "minimal" && settings.tools !== "hidden" && jobs.length > 2) add("<b>ONGOING TASKS</b>\n" + jobs.slice(-4).map(t => clean(t.name, 50)).join("\n"));
   if (detail !== "minimal" && snapshot.plan) {
