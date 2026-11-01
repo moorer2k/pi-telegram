@@ -189,7 +189,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
           for (const [oldId, oldState] of activities) {
             if (activities.size < MAX_TRACKED_ACTIVITIES) break;
             if (oldState.settled && !oldState.pending && !oldState.timer && !oldState.dirty &&
-                (oldState.failed || Date.now() - oldState.lastActivityAt >= RETAIN_SETTLED_MS)) clearState(oldId);
+                (!oldState.handle || (oldState.cleanupDeadline !== undefined && Date.now() >= oldState.cleanupDeadline))) clearState(oldId);
           }
           if (activities.size >= MAX_TRACKED_ACTIVITIES) return;
         }
