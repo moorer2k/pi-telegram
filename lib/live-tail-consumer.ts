@@ -282,6 +282,8 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
       if (state.pending || state.timer || state.dirty) {
         state.cleanup = undefined;
         // The active delivery or scheduled flush will re-arm cleanup.
+        // A dirty state without either mechanism needs its own flush.
+        if (!state.pending && !state.timer && state.dirty && !state.failed) schedule(id, 0);
         return;
       }
       if (state.handle && (state.deliveredContext ?? state.latest)) {
