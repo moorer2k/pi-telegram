@@ -35,6 +35,7 @@ interface LiveTailState {
   deliveryTargetKey?: string;
   deliveredContext?: TelegramActivityContext;
   deliveryPendingDeletion: boolean;
+  deletionStartedAt?: number;
   deliveryGeneration: number;
 }
 
@@ -53,6 +54,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
     if (state.timer) clearTimeout(state.timer);
     if (state.cleanup) clearTimeout(state.cleanup);
     state.deliveryPendingDeletion = false;
+    state.deletionStartedAt = undefined;
     state.cleanupDeadline = undefined;
     state.deliveryGeneration++;
     activities.delete(id);
@@ -288,6 +290,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
         const context = (state.deliveredContext ?? state.latest)!;
         const handle = state.handle;
         state.deliveryPendingDeletion = true;
+        state.deletionStartedAt = Date.now();
         // Preserve the state until deletion completes so a second cleanup cannot race it.
         void context.delete(handle).catch(() => {}).finally(() => {
           if (activities.get(id) === state) clearState(id);
