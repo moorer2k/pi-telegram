@@ -31,6 +31,7 @@ interface LiveTailState {
   cleanupDeadline?: number;
   editFailures: number;
   initialSendAttempted: boolean;
+  lastActivityAt: number;
 }
 
 export interface LiveTailConsumer {
@@ -169,8 +170,13 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
       if (!state) {
         if (event.type !== "agent-start") return;
         if (activities.size >= MAX_TRACKED_ACTIVITIES) {
-          // Never evict an active message handle to start another send.
-          return;
+          // Prefer expired, settled activities. Never discard a live edit handle.
+          for (const [oldId, oldState] of activities) {
+            if (activities.size < MAX_TRACKED_ACTIVITIES) break;
+            if (oldState.settled && !oldState.pending && !oldState.timer && !oldState.dirty &&
+                (oldState.failed || Date.now() - oldState.lastActivityAt >= RETAIN_SETTLED_MS)) clearState(oldId);
+          }
+          if (activities.size >= MAX_TRACKED_ACTIVITIES) return;
         }
         state = {
           projection: createLiveTailProjection(event.activityId),
@@ -179,11 +185,13 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
           revision: 0,
           editFailures: 0,
           initialSendAttempted: false,
+          lastActivityAt: Date.now(),
         };
         activities.set(event.activityId, state);
       }
       if (!state.projection.accept(event)) return;
       state.revision++;
+      state.lastActivityAt = Date.now();
       state.latest = ctx;
       if ((event.type === "reasoning-delta" && event.delta.length > 0) ||
           (event.type === "reasoning-end" && event.text.length > 0) ||
