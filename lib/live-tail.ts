@@ -16,7 +16,7 @@ export interface LiveTailTool {
   kind?: "tool" | "task" | "subagent" | "background";
   startedAt: number;
   elapsedMs?: number;
-  state: "running" | "done" | "error";
+  state: "running" | "done" | "error" | "interrupted";
 }
 
 export interface LiveTailSnapshot {
@@ -33,6 +33,7 @@ export interface LiveTailSnapshot {
   totalTools: number;
   completedTools: number;
   failedTools: number;
+  interruptedTools: number;
 }
 
 const MAX_REASONING = 360;
@@ -81,10 +82,12 @@ function appendBounded(current: string, addition: string, limit: number): string
 export function createLiveTailProjection(activityId: string) {
   const snapshot: LiveTailSnapshot = {
     activityId, reasoning: "", earlierReasoning: "", plan: "",
-    tools: [], settled: false, phase: "running", updatedAt: 0, startedAt: 0, totalTools: 0, completedTools: 0, failedTools: 0,
+    tools: [], settled: false, phase: "running", updatedAt: 0, startedAt: 0, totalTools: 0, completedTools: 0, failedTools: 0, interruptedTools: 0,
   };
   let reasoningIndex: number | undefined;
   let lastSequence = -1;
+  const seenToolIds = new Set<string>();
+  const finishedToolIds = new Set<string>();
 
   function accept(event: TelegramActivityEvent): boolean {
     if (event.activityId !== activityId || event.sequence <= lastSequence || snapshot.settled) return false;
@@ -108,7 +111,8 @@ export function createLiveTailProjection(activityId: string) {
         if (event.placement === "intermediate") snapshot.plan = event.text.slice(-MAX_PLAN);
         break;
       case "tool-start":
-        if (snapshot.tools.some(t => t.id === event.toolCallId)) break;
+        if (seenToolIds.has(event.toolCallId)) break;
+        seenToolIds.add(event.toolCallId);
         snapshot.totalTools++;
         snapshot.tools.push({ id: event.toolCallId, name: event.toolName.slice(0, 70), kind: /subagent|delegate|spawn/i.test(event.toolName) ? "subagent" : /background|process|job/i.test(event.toolName) ? "background" : /todo|task/i.test(event.toolName) ? "task" : "tool", command: toolCommand(event.toolName, event.args), startedAt: event.timestamp, state: "running" });
         if (snapshot.tools.length > MAX_TOOLS) {
@@ -127,8 +131,10 @@ export function createLiveTailProjection(activityId: string) {
       }
       case "tool-end": {
         const tool = snapshot.tools.find(t => t.id === event.toolCallId);
+        if (!seenToolIds.has(event.toolCallId) || finishedToolIds.has(event.toolCallId)) break;
+        finishedToolIds.add(event.toolCallId);
+        if (event.isError) snapshot.failedTools++; else snapshot.completedTools++;
         if (tool && tool.state === "running") {
-          if (event.isError) snapshot.failedTools++; else snapshot.completedTools++;
           tool.state = event.isError ? "error" : "done";
           tool.elapsedMs = Math.max(0, event.timestamp - tool.startedAt);
           tool.result = toolSummary(event.result);
@@ -154,12 +160,14 @@ export function createLiveTailProjection(activityId: string) {
         snapshot.settled = true;
         for (const tool of snapshot.tools) {
           if (tool.state === "running") {
-            tool.state = "error";
+            tool.state = "interrupted";
             tool.elapsedMs = Math.max(0, event.timestamp - tool.startedAt);
           }
         }
         // Include running records evicted under extreme concurrency.
-        snapshot.failedTools = Math.max(snapshot.failedTools, snapshot.totalTools - snapshot.completedTools);
+        snapshot.interruptedTools = Math.max(0, snapshot.totalTools - snapshot.completedTools - snapshot.failedTools - snapshot.interruptedTools);
+        seenToolIds.clear();
+        finishedToolIds.clear();
         break;
     }
     return true;
@@ -203,7 +211,7 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
   const jobs = active.filter(t => t.kind === "subagent" || t.kind === "background" || t.kind === "task");
   const finished = tools.filter(t => t.state !== "running");
   const line = (tool: LiveTailTool, compact = false) => {
-    const status = tool.state === "running" ? "[RUN]" : tool.state === "error" ? "[ERR]" : "[OK]";
+    const status = tool.state === "running" ? "[RUN]" : tool.state === "error" ? "[ERR]" : tool.state === "interrupted" ? "[STOP]" : "[OK]";
     const command = tool.command ? " " + clean(tool.command, compact ? 90 : 160) : "";
     const update = !compact && tool.update ? "\n" + clean(tool.update, 90) : "";
     const duration = tool.elapsedMs === undefined ? "" : " (" + (tool.elapsedMs / 1000).toFixed(1) + "s)";
@@ -233,7 +241,8 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
   }
   const done = snapshot.completedTools;
   const errors = snapshot.failedTools;
-  add("<b>STATUS</b>\n" + done + " done / " + activeCount + " active" + (errors ? " / " + errors + " errors" : "") + " / " + Math.floor(Math.max(0, snapshot.updatedAt - snapshot.startedAt) / 1000) + "s");
+  const interrupted = snapshot.interruptedTools;
+  add("<b>STATUS</b>\n" + done + " done / " + activeCount + " active" + (errors ? " / " + errors + " errors" : "") + (interrupted ? " / " + interrupted + " interrupted" : "") + " / " + Math.floor(Math.max(0, snapshot.updatedAt - snapshot.startedAt) / 1000) + "s");
   if (reasoningMode !== "hidden" && snapshot.reasoning && detail !== "minimal") {
     const summary = clean(snapshot.reasoning.slice(-240), 240);
     add("<b>REASONING</b>\n" + (reasoningMode === "expanded" ? summary : expandable(summary)));
