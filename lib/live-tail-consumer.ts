@@ -77,11 +77,14 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
         state.handle = result.value;
         state.lastText = text;
       } else if (result.reason === "rate-limited") {
+        if (result.partial) state.handle = result.partial;
         state.dirty = true;
         state.retryNotBefore = Date.now() + Math.max(EDIT_INTERVAL_MS, result.retryAfterMs ?? 3000);
         schedule(id, state.retryNotBefore - Date.now());
       } else {
-        // Do not create duplicate messages on an uncertain send/edit acknowledgement.
+        // Preserve any acknowledged message handle for final cleanup.
+        // Never retry an uncertain send: doing so could create duplicates.
+        if (result.partial) state.handle = result.partial;
         state.failed = true;
       }
     } catch {
