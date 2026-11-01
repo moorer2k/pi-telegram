@@ -115,7 +115,7 @@ export function createLiveTailProjection(activityId: string) {
         break;
       case "tool-update": {
         const tool = snapshot.tools.find(t => t.id === event.toolCallId);
-        if (tool) tool.update = toolSummary(event.update);
+        if (tool && tool.state === "running") tool.update = toolSummary(event.update);
         break;
       }
       case "tool-end": {
@@ -130,6 +130,13 @@ export function createLiveTailProjection(activityId: string) {
       }
       case "agent-settled":
         snapshot.settled = true;
+        for (const tool of snapshot.tools) {
+          if (tool.state === "running") {
+            tool.state = "error";
+            tool.elapsedMs = Math.max(0, event.timestamp - tool.startedAt);
+            snapshot.failedTools++;
+          }
+        }
         break;
     }
     return true;
