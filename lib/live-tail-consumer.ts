@@ -33,6 +33,7 @@ interface LiveTailState {
   initialSendAttempted: boolean;
   lastActivityAt: number;
   deliveryTargetKey?: string;
+  deliveredContext?: TelegramActivityContext;
 }
 
 export interface LiveTailConsumer {
@@ -105,6 +106,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
       if (closed || activities.get(id) !== state) return;
       if (result.ok) {
         state.handle = result.value;
+        state.deliveredContext = deliveryContext;
         state.lastText = text;
         state.retryNotBefore = 0;
         state.editFailures = 0;
@@ -268,8 +270,8 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
         // The edit completion path re-arms deletion after pending work drains.
         return;
       }
-      if (state.handle && state.latest) {
-        const context = state.latest;
+      if (state.handle && (state.deliveredContext ?? state.latest)) {
+        const context = (state.deliveredContext ?? state.latest)!;
         const handle = state.handle;
         void context.delete(handle).catch(() => {});
       }
