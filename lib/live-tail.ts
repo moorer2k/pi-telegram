@@ -150,7 +150,7 @@ export function createLiveTailProjection(activityId: string) {
         if (!event.toolCallId || seenToolIds.has(event.toolCallId)) break;
         seenToolIds.add(event.toolCallId);
         snapshot.totalTools++;
-        snapshot.tools.push({ id: event.toolCallId, name: safeText(event.toolName, 70) || "tool", kind: /subagent|delegate|spawn/i.test(event.toolName) ? "subagent" : /background|process|job/i.test(event.toolName) ? "background" : /todo|task/i.test(event.toolName) ? "task" : "tool", command: toolCommand(event.toolName, event.args), startedAt: event.timestamp, state: "running" });
+        snapshot.tools.push({ id: event.toolCallId, name: safeText(event.toolName, 70) || "tool", kind: /todo|task/i.test(event.toolName) ? "task" : "tool", command: toolCommand(event.toolName, event.args), startedAt: event.timestamp, state: "running" });
         if (snapshot.tools.length > MAX_TOOLS) {
           const finishedIndex = snapshot.tools.findIndex(t => t.state !== "running");
           if (finishedIndex >= 0) snapshot.tools.splice(finishedIndex, 1);
