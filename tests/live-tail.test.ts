@@ -168,3 +168,38 @@ test("invalid timestamps are ignored", () => {
   assert.equal(tail.accept({activityId:"timestamp",source:"telegram",timestamp:NaN,sequence:1,type:"agent-start"}),false);
   assert.equal(tail.accept({activityId:"timestamp",source:"telegram",timestamp:10,sequence:1,type:"agent-start"}),true);
 });
+
+test("reasoning-end preserves previous reasoning segments", () => {
+  const tail = createLiveTailProjection("reasoning-switch");
+  tail.accept({activityId:"reasoning-switch",source:"telegram",timestamp:1,sequence:1,type:"reasoning-delta",contentIndex:0,delta:"first segment"});
+  tail.accept({activityId:"reasoning-switch",source:"telegram",timestamp:2,sequence:2,type:"reasoning-end",contentIndex:1,text:"second segment"});
+  const state = tail.getSnapshot();
+  assert.match(state.earlierReasoning, /first segment/);
+  assert.equal(state.reasoning, "second segment");
+});
+
+test("compaction and settlement clear stale interactive prompts", () => {
+  const tail = createLiveTailProjection("prompt-clear");
+  tail.accept({activityId:"prompt-clear",source:"telegram",timestamp:1,sequence:1,type:"ui-prompt-start",kind:"confirm",title:"Confirm operation"});
+  tail.accept({activityId:"prompt-clear",source:"telegram",timestamp:2,sequence:2,type:"compaction-start",reason:"manual"});
+  assert.equal(tail.getSnapshot().prompt, undefined);
+  tail.accept({activityId:"prompt-clear",source:"telegram",timestamp:3,sequence:3,type:"ui-prompt-start",kind:"input",title:"Enter value"});
+  tail.accept({activityId:"prompt-clear",source:"telegram",timestamp:4,sequence:4,type:"agent-settled"});
+  assert.equal(tail.getSnapshot().prompt, undefined);
+});
+
+test("detailed recent history includes successful tool result previews", () => {
+  const tail = createLiveTailProjection("success-preview");
+  tail.accept({activityId:"success-preview",source:"telegram",timestamp:1,sequence:1,type:"tool-start",toolCallId:"one",toolName:"terminal",args:{command:"echo hello"}});
+  tail.accept({activityId:"success-preview",source:"telegram",timestamp:2,sequence:2,type:"tool-end",toolCallId:"one",toolName:"terminal",result:"hello from command",isError:false});
+  const output = renderLiveTail(tail.getSnapshot(), {detail:"detailed",tools:"recent"});
+  assert.match(output, /hello from command/);
+});
+
+test("status distinguishes failures from interrupted work", () => {
+  const tail = createLiveTailProjection("failed-status");
+  tail.accept({activityId:"failed-status",source:"telegram",timestamp:1,sequence:1,type:"tool-start",toolCallId:"a",toolName:"terminal",args:{}});
+  tail.accept({activityId:"failed-status",source:"telegram",timestamp:2,sequence:2,type:"tool-end",toolCallId:"a",toolName:"terminal",result:"failed",isError:true});
+  tail.accept({activityId:"failed-status",source:"telegram",timestamp:3,sequence:3,type:"agent-settled"});
+  assert.match(renderLiveTail(tail.getSnapshot()), /Finished with errors/);
+});
