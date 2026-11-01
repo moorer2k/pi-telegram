@@ -75,8 +75,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
   async function flush(id: string): Promise<void> {
     const state = activities.get(id);
     if (!state || closed || state.pending || state.failed || state.deliveryPendingDeletion || !state.latest) return;
-    if (state.retryNotBefore > Date.now()) {
-      if (state.settled && state.editRetryDeadline !== undefined && Date.now() >= state.editRetryDeadline) {
+    if (state.settled && state.editRetryDeadline !== undefined && Date.now() >= state.editRetryDeadline) {
         state.failed = true;
         state.dirty = false;
         if (state.finalDelivered) scheduleAutoDelete(id, state);
@@ -84,8 +83,9 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
           state.cleanupDeadline ??= Date.now() + RETAIN_SETTLED_MS;
           state.cleanup = setTimeout(() => clearState(id), Math.max(0, state.cleanupDeadline - Date.now()));
         }
-        return;
-      }
+      return;
+    }
+    if (state.retryNotBefore > Date.now()) {
       schedule(id, state.retryNotBefore - Date.now());
       return;
     }
@@ -178,13 +178,13 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
     } finally {
       state.pending = false;
       if (closed || activities.get(id) !== state) return;
-      if (state.dirty && !closed && !state.failed && !state.timer) {
-        schedule(id, EDIT_INTERVAL_MS);
-      }
       if (state.settled && state.editRetryDeadline !== undefined && Date.now() >= state.editRetryDeadline && state.dirty) {
         state.failed = true;
         state.dirty = false;
         if (state.timer) { clearTimeout(state.timer); state.timer = undefined; }
+      }
+      if (state.dirty && !closed && !state.failed && !state.timer) {
+        schedule(id, EDIT_INTERVAL_MS);
       }
       if (state.settled && state.finalDelivered) {
         if (state.failed) {
