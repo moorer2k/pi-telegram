@@ -181,6 +181,9 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
           (event.type === "reasoning-end" && event.text.length > 0) ||
           (event.type === "assistant-segment" && event.placement === "intermediate" && event.text.length > 0) ||
           event.type === "tool-start" ||
+          event.type === "child-work-start" ||
+          event.type === "child-work-update" ||
+          event.type === "child-work-end" ||
           event.type === "compaction-start" ||
           event.type === "ui-prompt-start") state.hasContent = true;
       if (event.type === "agent-settled") {
