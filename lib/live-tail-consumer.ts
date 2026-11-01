@@ -34,6 +34,7 @@ interface LiveTailState {
   lastActivityAt: number;
   deliveryTargetKey?: string;
   deliveredContext?: TelegramActivityContext;
+  deliveryPendingDeletion: boolean;
   deliveryGeneration: number;
 }
 
@@ -51,6 +52,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
     if (!state) return;
     if (state.timer) clearTimeout(state.timer);
     if (state.cleanup) clearTimeout(state.cleanup);
+    state.deliveryPendingDeletion = false;
     state.cleanupDeadline = undefined;
     state.deliveryGeneration++;
     activities.delete(id);
@@ -202,6 +204,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
           initialSendAttempted: false,
           lastActivityAt: Date.now(),
           deliveryGeneration: 0,
+          deliveryPendingDeletion: false,
         };
         activities.set(event.activityId, state);
       }
@@ -262,7 +265,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
   });
 
   function scheduleAutoDelete(id: string, state: LiveTailState): void {
-    if (!state.settled || !state.finalDelivered || state.cleanup || closed || state.pending || state.timer || state.dirty) return;
+    if (!state.settled || !state.finalDelivered || state.cleanup || state.deliveryPendingDeletion || closed || state.pending || state.timer || state.dirty) return;
     const delay: Record<string, number | undefined> = {
       keep: undefined, immediate: 0, "5s": 5000, "15s": 15000,
       "30s": 30000, "60s": 60000,
@@ -284,7 +287,12 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
       if (state.handle && (state.deliveredContext ?? state.latest)) {
         const context = (state.deliveredContext ?? state.latest)!;
         const handle = state.handle;
-        void context.delete(handle).catch(() => {});
+        state.deliveryPendingDeletion = true;
+        // Preserve the state until deletion completes so a second cleanup cannot race it.
+        void context.delete(handle).catch(() => {}).finally(() => {
+          if (activities.get(id) === state) clearState(id);
+        });
+        return;
       }
       clearState(id);
     }, Math.max(0, state.cleanupDeadline - Date.now()));
