@@ -272,6 +272,9 @@ function canCoalesceActivityEvents(
   if (previous.type === "tool-update" && next.type === "tool-update") {
     return previous.toolCallId === next.toolCallId;
   }
+  if (previous.type === "child-work-update" && next.type === "child-work-update") {
+    return previous.workId === next.workId;
+  }
   return false;
 }
 
