@@ -281,7 +281,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
       if (closed || activities.get(id) !== state) return;
       if (state.pending || state.timer || state.dirty) {
         state.cleanup = undefined;
-        // The edit completion path re-arms deletion after pending work drains.
+        // Keep the original deadline; the edit completion path re-arms deletion.
         return;
       }
       if (state.handle && (state.deliveredContext ?? state.latest)) {
