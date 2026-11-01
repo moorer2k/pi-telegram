@@ -283,3 +283,12 @@ test("status remains visible when detailed history approaches the Telegram budge
   assert.match(output, /24 done/);
   assert.ok(output.length <= 3800);
 });
+
+test("activity elapsed time never rewinds on late timestamped events", () => {
+  const tail = createLiveTailProjection("clock");
+  tail.accept({activityId:"clock",source:"telegram",timestamp:1000,sequence:1,type:"agent-start"});
+  tail.accept({activityId:"clock",source:"telegram",timestamp:9000,sequence:2,type:"tool-start",toolCallId:"a",toolName:"terminal",args:{}});
+  tail.accept({activityId:"clock",source:"telegram",timestamp:3000,sequence:3,type:"tool-update",toolCallId:"a",toolName:"terminal",update:"late"});
+  assert.equal(tail.getSnapshot().updatedAt, 9000);
+  assert.match(renderLiveTail(tail.getSnapshot()), /8s/);
+});
