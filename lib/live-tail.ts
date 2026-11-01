@@ -236,13 +236,13 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
   if (detail === "detailed") add("<b>VENOM // LIVE TAIL</b>");
   if (snapshot.phase === "compacting") add("<b>SESSION</b>\nCompacting context");
   if (snapshot.phase === "awaiting-input") add("<b>AWAITING INPUT</b>\n" + clean(snapshot.prompt ?? "User input", 120));
-  if (active.length && settings.tools !== "hidden") {
+  if (!snapshot.settled && active.length && settings.tools !== "hidden") {
     const current = active.slice(-2);
     add("<b>ACTIVE OPERATIONS</b>\n" + current.map(t => line(t)).join("\n"));
   } else {
     add("<b>CURRENT STATUS</b>\n" + phaseStatus);
   }
-  if (detail !== "minimal" && settings.tools !== "hidden" && jobs.length > 2) add("<b>ONGOING TASKS</b>\n" + jobs.slice(-4).map(t => clean(t.name, 50)).join("\n"));
+  if (!snapshot.settled && detail !== "minimal" && settings.tools !== "hidden" && jobs.length > 2) add("<b>ONGOING TASKS</b>\n" + jobs.slice(-4).map(t => clean(t.name, 50)).join("\n"));
   if (detail !== "minimal" && snapshot.plan) {
     add("<b>CURRENT TASK</b>\n" + clean(snapshot.plan.slice(-200), 200));
   }
