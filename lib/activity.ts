@@ -89,6 +89,9 @@ export type TelegramActivityPayload =
       title?: string;
     }
   | { type: "ui-prompt-end" }
+  | { type: "child-work-start"; workId: string; kind: "subagent" | "background"; label: string; parentToolCallId?: string }
+  | { type: "child-work-update"; workId: string; message: string }
+  | { type: "child-work-end"; workId: string; isError: boolean; result?: string }
   | { type: "agent-end" }
   | { type: "agent-settled" };
 
@@ -456,6 +459,9 @@ export function createTelegramActivityBridgeRuntime(deps: {
     onToolEnd(event) {
       getRuntime()?.onToolEnd(event);
     },
+    onChildWorkStart(event) { getRuntime()?.onChildWorkStart(event); },
+    onChildWorkUpdate(event) { getRuntime()?.onChildWorkUpdate(event); },
+    onChildWorkEnd(event) { getRuntime()?.onChildWorkEnd(event); },
     onCompactionStart(reason) {
       getRuntime()?.onCompactionStart(reason);
     },
@@ -528,6 +534,9 @@ export interface TelegramActivityRuntime {
     result: unknown;
     isError: boolean;
   }) => void;
+  onChildWorkStart: (event: { workId: string; kind: "subagent" | "background"; label: string; parentToolCallId?: string }) => void;
+  onChildWorkUpdate: (event: { workId: string; message: string }) => void;
+  onChildWorkEnd: (event: { workId: string; isError: boolean; result?: string }) => void;
   onCompactionStart: (
     reason: "manual" | "threshold" | "overflow" | "unknown",
   ) => void;
@@ -717,6 +726,18 @@ export function createTelegramActivityRuntime(deps: {
     },
     onToolEnd(event) {
       emit({ type: "tool-end", ...event });
+    },
+    onChildWorkStart(event) {
+      if (!activityId || !event.workId) return;
+      emit({ type: "child-work-start", ...event });
+    },
+    onChildWorkUpdate(event) {
+      if (!activityId || !event.workId) return;
+      emit({ type: "child-work-update", ...event });
+    },
+    onChildWorkEnd(event) {
+      if (!activityId || !event.workId) return;
+      emit({ type: "child-work-end", ...event });
     },
     onCompactionStart(reason) {
       abandonCompaction();
