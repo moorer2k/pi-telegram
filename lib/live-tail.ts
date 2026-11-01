@@ -38,25 +38,38 @@ const MAX_EARLIER = 600;
 const MAX_PLAN = 400;
 const MAX_TOOLS = 24;
 
-/** Only surface an explicit command/path, never arbitrary serialized tool arguments.
- * Reject credential-bearing or shell-environment assignments before showing a preview.
- */
+/** Only explicit, bounded display fields are allowed. Suppress likely secrets. */
+function safePreview(value: unknown, max = 160): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const text = value.replace(/\s+/g, " ").trim();
+  if (!text) return undefined;
+  const forbidden = ["password", "passwd", "secret", "token", "api_key", "apikey", "authorization", "bearer ", "private_key", "credential", ".env", "--key", "--password"];
+  if (forbidden.some(word => text.toLowerCase().includes(word))) return undefined;
+  return text.slice(0, max);
+}
+
 function toolCommand(name: string, args: unknown): string | undefined {
   if (!args || typeof args !== "object" || Array.isArray(args)) return undefined;
   const data = args as Record<string, unknown>;
-  const candidates = /^(bash|terminal|exec|shell|command|run|ssh)$/i.test(name)
-    ? ["command", "cmd", "script"]
-    : /^(read_file|write_file|edit_file|read|write|edit|grep|find|ls|search)$/i.test(name)
-      ? ["path", "file_path", "filePath", "pattern", "query"]
-      : [];
-  const key = candidates.find(k => typeof data[k] === "string");
-  if (!key) return undefined;
-  const value = String(data[key]).replace(/[\r\n\t]+/g, " ").trim();
-  if (!value || /(?:password|passwd|secret|token|api[_-]?key|authorization|bearer|private[_-]?key|credential|--password|--token|--key|\.env(?:\b|\/))/i.test(value)) return undefined;
-  if (/(?:^|\s)[A-Za-z_][A-Za-z0-9_]*(?:PASSWORD|TOKEN|SECRET|KEY)\s*=/.test(value)) return undefined;
-  return value.length > 180 ? value.slice(0, 177) + "..." : value;
+  const shell = /bash|terminal|exec|shell|command|run|ssh/i.test(name);
+  const keys = shell ? ["command", "cmd", "script"] : ["path", "file_path", "filePath", "pattern", "query", "description", "task", "command"];
+  for (const key of keys) {
+    const value = safePreview(data[key], 180);
+    if (value) return value;
+  }
+  return undefined;
 }
 
+function toolSummary(value: unknown): string | undefined {
+  if (typeof value === "string") return safePreview(value, 120);
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const data = value as Record<string, unknown>;
+  for (const key of ["text", "message", "summary", "status", "output"]) {
+    const preview = safePreview(data[key], 120);
+    if (preview) return preview;
+  }
+  return undefined;
+}
 
 function appendBounded(current: string, addition: string, limit: number): string {
   return (current + addition).slice(-limit);
@@ -102,7 +115,7 @@ export function createLiveTailProjection(activityId: string) {
         break;
       case "tool-update": {
         const tool = snapshot.tools.find(t => t.id === event.toolCallId);
-        if (tool && typeof event.update === "string") tool.update = event.update.slice(-160);
+        if (tool) tool.update = toolSummary(event.update);
         break;
       }
       case "tool-end": {
@@ -111,7 +124,7 @@ export function createLiveTailProjection(activityId: string) {
           if (event.isError) snapshot.failedTools++; else snapshot.completedTools++;
           tool.state = event.isError ? "error" : "done";
           tool.elapsedMs = Math.max(0, event.timestamp - tool.startedAt);
-          if (event.isError && typeof event.result === "string") tool.result = event.result.slice(0, 120);
+          tool.result = toolSummary(event.result);
         }
         break;
       }
@@ -162,7 +175,8 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
     const command = tool.command ? " " + clean(tool.command, compact ? 90 : 160) : "";
     const update = !compact && tool.update ? "\n" + clean(tool.update, 90) : "";
     const duration = tool.elapsedMs === undefined ? "" : " (" + (tool.elapsedMs / 1000).toFixed(1) + "s)";
-    return status + " <code>" + clean(tool.name, 50) + command + "</code>" + duration + update;
+    const result = !compact && tool.state === "error" && tool.result ? "\n" + clean(tool.result, 90) : "";
+    return status + " <code>" + clean(tool.name, 50) + command + "</code>" + duration + update + result;
   };
   if (detail === "detailed") add("<b>VENOM // LIVE TAIL</b>");
   if (active.length && settings.tools !== "hidden") {
