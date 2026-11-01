@@ -253,18 +253,18 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
     const update = !compact && tool.update ? "\n" + safeClean(tool.update, 90) : "";
     const duration = tool.elapsedMs === undefined ? "" : " (" + safeDuration(tool.elapsedMs) + ")";
     const result = !compact && tool.state !== "running" && tool.result ? "\n" + safeClean(tool.result, 90) : "";
-    return status + " <code>" + clean(tool.name, 50) + command + "</code>" + duration + update + result;
+    return status + " <code>" + (safeClean(tool.name, 50) || "tool") + command + "</code>" + duration + update + result;
   };
   if (detail === "detailed") add("<b>VENOM // LIVE TAIL</b>");
   if (snapshot.phase === "compacting") add("<b>SESSION</b>\nCompacting context");
-  if (snapshot.phase === "awaiting-input") add("<b>AWAITING INPUT</b>\n" + clean(snapshot.prompt ?? "User input", 120));
+  if (snapshot.phase === "awaiting-input") add("<b>AWAITING INPUT</b>\n" + (safeClean(snapshot.prompt ?? "User input", 120) || "Input requested"));
   if (!snapshot.settled && active.length && settings.tools !== "hidden") {
     const current = active.slice(-2);
     add("<b>ACTIVE OPERATIONS</b>\n" + current.map(t => line(t)).join("\n") + (active.length > current.length ? "\n+" + (active.length - current.length) + " other active" : "") + (hiddenActiveCount ? "\n+" + hiddenActiveCount + " untracked in visible history" : ""));
   } else {
     add("<b>CURRENT STATUS</b>\n" + phaseStatus);
   }
-  if (!snapshot.settled && detail !== "minimal" && settings.tools !== "hidden" && jobs.length > 2) add("<b>ONGOING TASKS</b>\n" + jobs.slice(-4).map(t => clean(t.name, 50)).join("\n"));
+  if (!snapshot.settled && detail !== "minimal" && settings.tools !== "hidden" && jobs.length > 2) add("<b>ONGOING TASKS</b>\n" + jobs.slice(-4).map(t => safeClean(t.name, 50) || "tool").join("\n"));
   if (detail !== "minimal" && snapshot.plan) {
     add("<b>CURRENT TASK</b>\n" + safeClean(snapshot.plan.slice(-200), 200));
   }
