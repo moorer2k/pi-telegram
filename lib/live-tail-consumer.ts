@@ -60,7 +60,11 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
   async function flush(id: string): Promise<void> {
     const state = activities.get(id);
     if (!state || closed || state.pending || state.failed || !state.latest) return;
-    if (getSettings().enabled === false) return;
+    if (getSettings().enabled === false) {
+      // A disabled consumer must not retain pending timers or activity state.
+      clearState(id);
+      return;
+    }
     state.pending = true;
     state.lastFlushStartedAt = Date.now();
     state.dirty = false;
@@ -98,7 +102,10 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
       if (state.dirty && !closed && !state.failed && !state.timer) {
         schedule(id, EDIT_INTERVAL_MS);
       }
-      if (state.settled && state.finalDelivered) scheduleAutoDelete(id, state);
+      if (state.settled && state.finalDelivered) {
+        if (state.failed) state.dirty = false;
+        scheduleAutoDelete(id, state);
+      }
       if (state.settled && !state.cleanup && !state.finalDelivered) {
         state.cleanup = setTimeout(() => clearState(id), RETAIN_SETTLED_MS);
       }
@@ -136,7 +143,10 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
         if (!state.hasContent) { clearState(event.activityId); return; }
       }
       if (state.failed) {
-        if (state.settled && state.finalDelivered) scheduleAutoDelete(event.activityId, state);
+        if (state.settled && state.finalDelivered) {
+          state.dirty = false;
+          scheduleAutoDelete(event.activityId, state);
+        }
         else if (state.settled && !state.cleanup) state.cleanup = setTimeout(() => clearState(event.activityId), RETAIN_SETTLED_MS);
         return;
       }
@@ -166,7 +176,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
     }
     state.cleanup = setTimeout(() => {
       if (closed || activities.get(id) !== state) return;
-      if (state.pending) { state.cleanup = undefined; scheduleAutoDelete(id, state); return; }
+      if (state.pending || state.timer || state.dirty) { state.cleanup = undefined; scheduleAutoDelete(id, state); return; }
       if (state.handle && state.latest) void state.latest.delete(state.handle).catch(() => {});
       clearState(id);
     }, ms);
