@@ -202,8 +202,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
           state.handle = result.partial;
           state.deliveredContext = deliveryContext;
         }
-        state.failed = true;
-        state.dirty = false;
+        retireFailedActivity(id, state);
       }
     } catch {
       if (closed || activities.get(id) !== state || state.deliveryGeneration !== generation) return;
@@ -214,8 +213,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
         state.retryNotBefore = Date.now() + Math.min(15000, 1500 * 2 ** state.editFailures);
         schedule(id, state.retryNotBefore - Date.now());
       } else {
-        state.failed = true;
-        state.dirty = false;
+        retireFailedActivity(id, state);
       }
     } finally {
       state.pending = false;
