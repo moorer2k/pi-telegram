@@ -161,6 +161,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
         state.retryNotBefore = Date.now() + Math.min(15000, 1500 * 2 ** state.editFailures);
         schedule(id, state.retryNotBefore - Date.now());
       } else {
+        // Message-unavailable and stale-handle failures are terminal for this handle.
         // Preserve any acknowledged message handle for final cleanup.
         // Never retry an uncertain send: doing so could create duplicates.
         if (result.partial) {
