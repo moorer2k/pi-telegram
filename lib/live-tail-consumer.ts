@@ -114,7 +114,10 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
         // A newer event may have arrived while this delivery was in flight.
         // Preserve dirty=true in that case so the latest projection is flushed.
       } else if (result.reason === "rate-limited" && (state.handle || result.partial)) {
-        if (result.partial) state.handle = result.partial;
+        if (result.partial) {
+          state.handle = result.partial;
+          state.deliveredContext = deliveryContext;
+        }
         state.dirty = true;
         state.retryNotBefore = Date.now() + Math.max(EDIT_INTERVAL_MS, Math.min(120000, typeof result.retryAfterMs === "number" && Number.isFinite(result.retryAfterMs) ? result.retryAfterMs : 3000));
         schedule(id, state.retryNotBefore - Date.now());
@@ -128,7 +131,10 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
       } else {
         // Preserve any acknowledged message handle for final cleanup.
         // Never retry an uncertain send: doing so could create duplicates.
-        if (result.partial) state.handle = result.partial;
+        if (result.partial) {
+          state.handle = result.partial;
+          state.deliveredContext = deliveryContext;
+        }
         state.failed = true;
         state.dirty = false;
       }
