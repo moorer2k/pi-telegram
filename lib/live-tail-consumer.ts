@@ -72,8 +72,11 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
       const settings = getSettings();
       const text = renderLiveTail(state.projection.getSnapshot(), settings);
       // Do not emit a status-only message for turns without visible activity.
-      if (!state.hasContent || text === state.lastText) return;
-      if (!text.trim()) return;
+      if (!state.hasContent || text === state.lastText || !text.trim()) {
+        // A no-op flush still needs to release the dirty flag and allow cleanup.
+        state.dirty = false;
+        return;
+      }
       const view = { text, parseMode: "html" as const };
       const result = state.handle
         ? await state.latest.edit(state.handle, view)
@@ -83,6 +86,8 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
         state.handle = result.value;
         state.lastText = text;
         state.retryNotBefore = 0;
+        // A newer event may have arrived while this delivery was in flight.
+        // Preserve dirty=true in that case so the latest projection is flushed.
       } else if (result.reason === "rate-limited") {
         if (result.partial) state.handle = result.partial;
         state.dirty = true;
@@ -93,17 +98,22 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
         // Never retry an uncertain send: doing so could create duplicates.
         if (result.partial) state.handle = result.partial;
         state.failed = true;
+        state.dirty = false;
       }
     } catch {
       // Transport exceptions are ambiguous; retrying a send could duplicate the message.
       state.failed = true;
+      state.dirty = false;
     } finally {
       state.pending = false;
       if (state.dirty && !closed && !state.failed && !state.timer) {
         schedule(id, EDIT_INTERVAL_MS);
       }
       if (state.settled && state.finalDelivered) {
-        if (state.failed) state.dirty = false;
+        if (state.failed) {
+          state.dirty = false;
+          if (state.timer) { clearTimeout(state.timer); state.timer = undefined; }
+        }
         scheduleAutoDelete(id, state);
       }
       if (state.settled && !state.cleanup && !state.finalDelivered) {
