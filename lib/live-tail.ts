@@ -136,8 +136,11 @@ export function createLiveTailProjection(activityId: string) {
         if (reasoningIndex !== undefined && reasoningIndex !== event.contentIndex && snapshot.reasoning) {
           snapshot.earlierReasoning = appendBounded(snapshot.earlierReasoning, snapshot.reasoning + "\n", MAX_EARLIER);
         }
+        const endingSameSegment = reasoningIndex === event.contentIndex;
         reasoningIndex = event.contentIndex;
-        snapshot.reasoning = safeText(event.text.slice(-MAX_REASONING), MAX_REASONING);
+        // A final segment must not resurrect content suppressed by earlier deltas.
+        snapshot.reasoning = reasoningRedacted && endingSameSegment
+          ? "" : safeText(event.text.slice(-MAX_REASONING), MAX_REASONING);
         reasoningRedacted = false;
         break;
       case "assistant-segment":
