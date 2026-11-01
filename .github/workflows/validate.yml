@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - feat/live-tail-progress-engine
   pull_request:
   workflow_call:
 
