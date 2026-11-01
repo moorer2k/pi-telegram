@@ -27,6 +27,8 @@ interface LiveTailState {
   retryNotBefore: number;
   hasContent: boolean;
   finalDelivered: boolean;
+  revision: number;
+  cleanupDeadline?: number;
 }
 
 export interface LiveTailConsumer {
@@ -43,13 +45,14 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
     if (!state) return;
     if (state.timer) clearTimeout(state.timer);
     if (state.cleanup) clearTimeout(state.cleanup);
+    state.cleanupDeadline = undefined;
     activities.delete(id);
   }
 
   function schedule(id: string, delay: number): void {
     const state = activities.get(id);
     if (!state || closed || state.failed) return;
-    if (state.cleanup) { clearTimeout(state.cleanup); state.cleanup = undefined; }
+    if (state.cleanup) { clearTimeout(state.cleanup); state.cleanup = undefined; state.cleanupDeadline = undefined; }
     delay = Math.max(0, Number.isFinite(delay) ? delay : EDIT_INTERVAL_MS, state.retryNotBefore - Date.now());
     if (state.timer) clearTimeout(state.timer);
     state.timer = setTimeout(() => {
@@ -73,13 +76,14 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
     state.pending = true;
     state.lastFlushStartedAt = Date.now();
     state.dirty = false;
+    const sentRevision = state.revision;
     try {
       const settings = getSettings();
       const text = renderLiveTail(state.projection.getSnapshot(), settings);
       // Do not emit a status-only message for turns without visible activity.
       if (!state.hasContent || text === state.lastText || !text.trim()) {
-        // A no-op flush still needs to release the dirty flag and allow cleanup.
-        state.dirty = false;
+        // A no-op flush may still have been superseded by a newer event.
+        state.dirty = state.revision !== sentRevision;
         return;
       }
       const view = { text, parseMode: "html" as const };
@@ -91,6 +95,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
         state.handle = result.value;
         state.lastText = text;
         state.retryNotBefore = 0;
+        if (state.revision !== sentRevision) state.dirty = true;
         // A newer event may have arrived while this delivery was in flight.
         // Preserve dirty=true in that case so the latest projection is flushed.
       } else if (result.reason === "rate-limited") {
@@ -147,10 +152,12 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
           projection: createLiveTailProjection(event.activityId),
           pending: false, dirty: false, failed: false, settled: false, lastFlushStartedAt: 0, retryNotBefore: 0, hasContent: false, finalDelivered: false,
           replyToMessageId: event.replyToMessageId,
+          revision: 0,
         };
         activities.set(event.activityId, state);
       }
       if (!state.projection.accept(event)) return;
+      state.revision++;
       state.latest = ctx;
       if ((event.type === "reasoning-delta" && event.delta.length > 0) ||
           (event.type === "reasoning-end" && event.text.length > 0) ||
