@@ -128,7 +128,8 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
         scheduleAutoDelete(id, state);
       }
       if (state.settled && !state.cleanup && !state.finalDelivered && !state.timer && !state.dirty) {
-        state.cleanup = setTimeout(() => clearState(id), RETAIN_SETTLED_MS);
+        state.cleanupDeadline ??= Date.now() + RETAIN_SETTLED_MS;
+        state.cleanup = setTimeout(() => clearState(id), Math.max(0, state.cleanupDeadline - Date.now()));
       }
     }
   }
@@ -174,7 +175,10 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
           state.dirty = false;
           scheduleAutoDelete(event.activityId, state);
         }
-        else if (state.settled && !state.cleanup) state.cleanup = setTimeout(() => clearState(event.activityId), RETAIN_SETTLED_MS);
+        else if (state.settled && !state.cleanup) {
+          state.cleanupDeadline ??= Date.now() + RETAIN_SETTLED_MS;
+          state.cleanup = setTimeout(() => clearState(event.activityId), Math.max(0, state.cleanupDeadline - Date.now()));
+        }
         return;
       }
       if (state.pending) {
@@ -199,15 +203,17 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
     };
     const ms = delay[getSettings().autoDelete ?? "keep"];
     if (ms === undefined) {
-      state.cleanup = setTimeout(() => clearState(id), RETAIN_SETTLED_MS);
+      state.cleanupDeadline ??= Date.now() + RETAIN_SETTLED_MS;
+      state.cleanup = setTimeout(() => clearState(id), Math.max(0, state.cleanupDeadline - Date.now()));
       return;
     }
+    state.cleanupDeadline ??= Date.now() + ms;
     state.cleanup = setTimeout(() => {
       if (closed || activities.get(id) !== state) return;
       if (state.pending || state.timer || state.dirty) { state.cleanup = undefined; scheduleAutoDelete(id, state); return; }
       if (state.handle && state.latest) void state.latest.delete(state.handle).catch(() => {});
       clearState(id);
-    }, ms);
+    }, Math.max(0, state.cleanupDeadline - Date.now()));
   }
 
   const disposeConsumer = () => {
@@ -223,6 +229,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
           state.replyToMessageId !== replyToMessageId || state.finalDelivered) continue;
       state.finalDelivered = true;
       if (state.cleanup) { clearTimeout(state.cleanup); state.cleanup = undefined; }
+      state.cleanupDeadline = undefined;
       // The final progress edit must complete before an immediate deletion.
       if (state.settled && !state.pending && !state.timer && !state.dirty) scheduleAutoDelete(id, state);
     }
