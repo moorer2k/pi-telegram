@@ -151,7 +151,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
   });
 
   function scheduleAutoDelete(id: string, state: LiveTailState): void {
-    if (!state.settled || !state.finalDelivered || state.cleanup || closed || state.pending) return;
+    if (!state.settled || !state.finalDelivered || state.cleanup || closed || state.pending || state.timer || state.dirty) return;
     const delay: Record<string, number | undefined> = {
       keep: undefined, immediate: 0, "5s": 5000, "15s": 15000,
       "30s": 30000, "60s": 60000,
@@ -182,7 +182,8 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
           state.replyToMessageId !== replyToMessageId || state.finalDelivered) continue;
       state.finalDelivered = true;
       if (state.cleanup) { clearTimeout(state.cleanup); state.cleanup = undefined; }
-      scheduleAutoDelete(id, state);
+      // The final progress edit must complete before an immediate deletion.
+      if (state.settled && !state.pending && !state.timer && !state.dirty) scheduleAutoDelete(id, state);
     }
   };
   return { dispose: disposeConsumer, onFinalDelivered };
