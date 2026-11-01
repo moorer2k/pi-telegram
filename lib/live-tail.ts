@@ -13,6 +13,7 @@ export interface LiveTailTool {
   command?: string;
   update?: string;
   result?: string;
+  kind?: "tool" | "task" | "subagent" | "background";
   startedAt: number;
   elapsedMs?: number;
   state: "running" | "done" | "error";
@@ -91,9 +92,13 @@ export function createLiveTailProjection(activityId: string) {
         if (event.placement === "intermediate") snapshot.plan = event.text.slice(-MAX_PLAN);
         break;
       case "tool-start":
+        if (snapshot.tools.some(t => t.id === event.toolCallId)) break;
         snapshot.totalTools++;
-        snapshot.tools.push({ id: event.toolCallId, name: event.toolName.slice(0, 70), command: toolCommand(event.toolName, event.args), startedAt: event.timestamp, state: "running" });
-        if (snapshot.tools.length > MAX_TOOLS) snapshot.tools.splice(0, snapshot.tools.length - MAX_TOOLS);
+        snapshot.tools.push({ id: event.toolCallId, name: event.toolName.slice(0, 70), kind: /subagent|delegate|spawn/i.test(event.toolName) ? "subagent" : /background|process|job/i.test(event.toolName) ? "background" : /todo|task/i.test(event.toolName) ? "task" : "tool", command: toolCommand(event.toolName, event.args), startedAt: event.timestamp, state: "running" });
+        if (snapshot.tools.length > MAX_TOOLS) {
+          const finishedIndex = snapshot.tools.findIndex(t => t.state !== "running");
+          if (finishedIndex >= 0) snapshot.tools.splice(finishedIndex, 1);
+        }
         break;
       case "tool-update": {
         const tool = snapshot.tools.find(t => t.id === event.toolCallId);
@@ -179,7 +184,7 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
   }
   const done = snapshot.completedTools;
   const errors = snapshot.failedTools;
-  add("<b>STATUS</b>\n" + done + " done / " + active.length + " active" + (errors ? " / " + errors + " errors" : ""));
+  add("<b>STATUS</b>\n" + done + " done / " + active.length + " active" + (errors ? " / " + errors + " errors" : "") + " / " + Math.floor(Math.max(0, snapshot.updatedAt - snapshot.startedAt) / 1000) + "s");
   if (reasoningMode !== "hidden" && snapshot.reasoning && detail !== "minimal") {
     const summary = clean(snapshot.reasoning.slice(-240), 240);
     add("<b>REASONING</b>\n" + (reasoningMode === "expanded" ? summary : expandable(summary)));
