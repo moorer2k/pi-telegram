@@ -98,6 +98,7 @@ export function createLiveTailProjection(activityId: string) {
   let reasoningIndex: number | undefined;
   let lastSequence = -1;
   const seenChildIds = new Set<string>();
+  const childKindTotals = { subagent: 0, background: 0 };
   const MAX_CHILD_HISTORY = 24;
   const endedChildIds = new Set<string>();
   const seenToolIds = new Set<string>();
@@ -180,6 +181,7 @@ export function createLiveTailProjection(activityId: string) {
         if (!event.workId || seenChildIds.has(event.workId)) break;
         seenChildIds.add(event.workId);
         snapshot.totalChildWork++;
+        childKindTotals[event.kind]++;
         snapshot.childWork.push({ id: event.workId, name: safeText(event.label, 70) || event.kind, kind: event.kind, parentToolCallId: event.parentToolCallId, startedAt: event.timestamp, state: "running" });
         let finishedChildren = snapshot.childWork.reduce((count, child) => count + (child.state !== "running" ? 1 : 0), 0);
         while (finishedChildren > MAX_CHILD_HISTORY) {
