@@ -26,6 +26,10 @@ export interface LiveTailSnapshot {
   tools: LiveTailTool[];
   settled: boolean;
   updatedAt: number;
+  startedAt: number;
+  totalTools: number;
+  completedTools: number;
+  failedTools: number;
 }
 
 const MAX_REASONING = 360;
@@ -60,7 +64,7 @@ function appendBounded(current: string, addition: string, limit: number): string
 export function createLiveTailProjection(activityId: string) {
   const snapshot: LiveTailSnapshot = {
     activityId, reasoning: "", earlierReasoning: "", plan: "",
-    tools: [], settled: false, updatedAt: 0,
+    tools: [], settled: false, updatedAt: 0, startedAt: 0, totalTools: 0, completedTools: 0, failedTools: 0,
   };
   let reasoningIndex: number | undefined;
   let lastSequence = -1;
@@ -69,6 +73,7 @@ export function createLiveTailProjection(activityId: string) {
     if (event.activityId !== activityId || event.sequence <= lastSequence || snapshot.settled) return false;
     lastSequence = event.sequence;
     snapshot.updatedAt = event.timestamp;
+    if (!snapshot.startedAt) snapshot.startedAt = event.timestamp;
     switch (event.type) {
       case "reasoning-delta":
         if (reasoningIndex !== undefined && reasoningIndex !== event.contentIndex) {
@@ -86,6 +91,7 @@ export function createLiveTailProjection(activityId: string) {
         if (event.placement === "intermediate") snapshot.plan = event.text.slice(-MAX_PLAN);
         break;
       case "tool-start":
+        snapshot.totalTools++;
         snapshot.tools.push({ id: event.toolCallId, name: event.toolName.slice(0, 70), command: toolCommand(event.toolName, event.args), startedAt: event.timestamp, state: "running" });
         if (snapshot.tools.length > MAX_TOOLS) snapshot.tools.splice(0, snapshot.tools.length - MAX_TOOLS);
         break;
@@ -96,7 +102,8 @@ export function createLiveTailProjection(activityId: string) {
       }
       case "tool-end": {
         const tool = snapshot.tools.find(t => t.id === event.toolCallId);
-        if (tool) {
+        if (tool && tool.state === "running") {
+          if (event.isError) snapshot.failedTools++; else snapshot.completedTools++;
           tool.state = event.isError ? "error" : "done";
           tool.elapsedMs = Math.max(0, event.timestamp - tool.startedAt);
           if (event.isError && typeof event.result === "string") tool.result = event.result.slice(0, 120);
@@ -153,7 +160,7 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
     return status + " <code>" + clean(tool.name, 50) + command + "</code>" + duration + update;
   };
   if (detail === "detailed") add("<b>VENOM // LIVE TAIL</b>");
-  if (active.length) {
+  if (active.length && settings.tools !== "hidden") {
     const current = active.slice(-2);
     add("<b>ACTIVE OPERATIONS</b>\n" + current.map(t => line(t)).join("\n"));
   } else {
@@ -170,8 +177,8 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
       if (history.length) add("<i>Earlier operations (" + history.length + ")</i>\n" + expandable(history.map(t => line(t, true)).join("\n")));
     }
   }
-  const done = finished.filter(t => t.state === "done").length;
-  const errors = finished.length - done;
+  const done = snapshot.completedTools;
+  const errors = snapshot.failedTools;
   add("<b>STATUS</b>\n" + done + " done / " + active.length + " active" + (errors ? " / " + errors + " errors" : ""));
   if (reasoningMode !== "hidden" && snapshot.reasoning && detail !== "minimal") {
     const summary = clean(snapshot.reasoning.slice(-240), 240);
