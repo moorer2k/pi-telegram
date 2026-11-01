@@ -321,3 +321,30 @@ test("normal reasoning remains visible after sanitization", () => {
   tail.accept({activityId:"normal-reasoning",source:"telegram",timestamp:1,sequence:1,type:"reasoning-delta",contentIndex:0,delta:"Checking the build output"});
   assert.match(renderLiveTail(tail.getSnapshot(), {reasoning:"expanded"}), /Checking the build output/);
 });
+
+test("active operation overflow is reported without hiding current work", () => {
+  const tail = createLiveTailProjection("active-overflow");
+  for (let i = 0; i < 5; i++) {
+    tail.accept({activityId:"active-overflow",source:"telegram",timestamp:i+1,sequence:i+1,type:"tool-start",toolCallId:String(i),toolName:"terminal",args:{}});
+  }
+  const output = renderLiveTail(tail.getSnapshot(), {detail:"detailed"});
+  assert.match(output, /3 other active/);
+  assert.match(output, /5 active/);
+});
+
+test("evicted active operations remain visible in aggregate status", () => {
+  const tail = createLiveTailProjection("evicted-active");
+  for (let i = 0; i < 70; i++) {
+    tail.accept({activityId:"evicted-active",source:"telegram",timestamp:i+1,sequence:i+1,type:"tool-start",toolCallId:String(i),toolName:"terminal",args:{}});
+  }
+  const output = renderLiveTail(tail.getSnapshot(), {detail:"detailed"});
+  assert.match(output, /70 active/);
+  assert.match(output, /untracked in visible history/);
+});
+
+test("authorization headers are not displayed in command previews", () => {
+  const tail = createLiveTailProjection("headers");
+  tail.accept({activityId:"headers",source:"telegram",timestamp:1,sequence:1,type:"tool-start",toolCallId:"a",toolName:"terminal",args:{command:"curl -H 'X-API-Key: abc123' https://example.com"}});
+  const output = renderLiveTail(tail.getSnapshot(), {detail:"detailed"});
+  assert.doesNotMatch(output, /abc123/);
+});
