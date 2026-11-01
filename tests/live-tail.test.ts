@@ -72,7 +72,8 @@ test("live tail closes interrupted operations and settles counts", () => {
   const state = tail.getSnapshot();
   assert.equal(state.totalTools, 70);
   assert.equal(state.completedTools, 0);
-  assert.equal(state.failedTools, 70);
+  assert.equal(state.failedTools, 0);
+  assert.equal(state.interruptedTools, 70);
   assert.match(renderLiveTail(state), /0 active/);
 });
 
@@ -97,4 +98,26 @@ test("live tail redacts secrets and retains valid bounded markup", () => {
   assert.match(output, /&lt;hello&gt;&amp;/);
   assert.ok(output.length < 4096);
   assert.equal((output.match(/<blockquote expandable>/g) ?? []).length, (output.match(/<\/blockquote>/g) ?? []).length);
+});
+
+test("live tail counts completions even when the operation was evicted", () => {
+  const tail = createLiveTailProjection("evicted");
+  for (let i = 0; i < 70; i++) {
+    tail.accept({activityId:"evicted",source:"telegram",timestamp:i+1,sequence:i+1,type:"tool-start",toolCallId:String(i),toolName:"terminal",args:{}});
+  }
+  tail.accept({activityId:"evicted",source:"telegram",timestamp:100,sequence:71,type:"tool-end",toolCallId:"0",toolName:"terminal",result:"ok",isError:false});
+  tail.accept({activityId:"evicted",source:"telegram",timestamp:101,sequence:72,type:"tool-end",toolCallId:"0",toolName:"terminal",result:"ok",isError:false});
+  const state = tail.getSnapshot();
+  assert.equal(state.totalTools, 70);
+  assert.equal(state.completedTools, 1);
+  assert.equal(state.failedTools, 0);
+});
+
+test("live tail does not restart an evicted operation with the same ID", () => {
+  const tail = createLiveTailProjection("evicted-dedupe");
+  for (let i = 0; i < 70; i++) {
+    tail.accept({activityId:"evicted-dedupe",source:"telegram",timestamp:i+1,sequence:i+1,type:"tool-start",toolCallId:String(i),toolName:"terminal",args:{}});
+  }
+  tail.accept({activityId:"evicted-dedupe",source:"telegram",timestamp:100,sequence:71,type:"tool-start",toolCallId:"0",toolName:"terminal",args:{}});
+  assert.equal(tail.getSnapshot().totalTools, 70);
 });
