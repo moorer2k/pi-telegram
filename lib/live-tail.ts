@@ -25,6 +25,11 @@ export interface LiveTailSnapshot {
   earlierReasoning: string;
   plan: string;
   tools: LiveTailTool[];
+  childWork: LiveTailTool[];
+  totalChildWork: number;
+  completedChildWork: number;
+  failedChildWork: number;
+  interruptedChildWork: number;
   settled: boolean;
   phase: "running" | "compacting" | "awaiting-input" | "finished";
   prompt?: string;
@@ -87,10 +92,12 @@ function appendBounded(current: string, addition: string, limit: number): string
 export function createLiveTailProjection(activityId: string) {
   const snapshot: LiveTailSnapshot = {
     activityId, reasoning: "", earlierReasoning: "", plan: "",
-    tools: [], settled: false, phase: "running", updatedAt: 0, startedAt: 0, totalTools: 0, completedTools: 0, failedTools: 0, interruptedTools: 0,
+    tools: [], childWork: [], totalChildWork: 0, completedChildWork: 0, failedChildWork: 0, interruptedChildWork: 0, settled: false, phase: "running", updatedAt: 0, startedAt: 0, totalTools: 0, completedTools: 0, failedTools: 0, interruptedTools: 0,
   };
   let reasoningIndex: number | undefined;
   let lastSequence = -1;
+  const seenChildIds = new Set<string>();
+  const endedChildIds = new Set<string>();
   const seenToolIds = new Set<string>();
   const finishedToolIds = new Set<string>();
   let firstTimestampSeen = false;
@@ -167,6 +174,35 @@ export function createLiveTailProjection(activityId: string) {
         }
         break;
       }
+      case "child-work-start": {
+        if (!event.workId || seenChildIds.has(event.workId)) break;
+        seenChildIds.add(event.workId);
+        snapshot.totalChildWork++;
+        snapshot.childWork.push({ id: event.workId, name: safeText(event.label, 70) || event.kind, kind: event.kind, startedAt: event.timestamp, state: "running" });
+        if (snapshot.childWork.length > MAX_ACTIVE_TOOLS) {
+          const finishedIndex = snapshot.childWork.findIndex(t => t.state !== "running");
+          snapshot.childWork.splice(finishedIndex < 0 ? 0 : finishedIndex, 1);
+        }
+        break;
+      }
+      case "child-work-update": {
+        if (endedChildIds.has(event.workId)) break;
+        const child = snapshot.childWork.find(t => t.id === event.workId && t.state === "running");
+        if (child) child.update = safeText(event.message, 120) || child.update;
+        break;
+      }
+      case "child-work-end": {
+        if (!seenChildIds.has(event.workId) || endedChildIds.has(event.workId)) break;
+        endedChildIds.add(event.workId);
+        if (event.isError) snapshot.failedChildWork++; else snapshot.completedChildWork++;
+        const child = snapshot.childWork.find(t => t.id === event.workId && t.state === "running");
+        if (child) {
+          child.state = event.isError ? "error" : "done";
+          child.elapsedMs = Math.max(0, event.timestamp - child.startedAt);
+          child.result = event.result ? safeText(event.result, 120) : undefined;
+        }
+        break;
+      }
       case "compaction-start":
         snapshot.phase = "compacting";
         snapshot.prompt = undefined;
@@ -194,6 +230,15 @@ export function createLiveTailProjection(activityId: string) {
             tool.elapsedMs = Math.max(0, event.timestamp - tool.startedAt);
           }
         }
+        for (const child of snapshot.childWork) {
+          if (child.state === "running") {
+            child.state = "interrupted";
+            child.elapsedMs = Math.max(0, event.timestamp - child.startedAt);
+          }
+        }
+        snapshot.interruptedChildWork = Math.max(0, snapshot.totalChildWork - snapshot.completedChildWork - snapshot.failedChildWork);
+        seenChildIds.clear();
+        endedChildIds.clear();
         // Include running records evicted under extreme concurrency.
         snapshot.interruptedTools = Math.max(0, snapshot.totalTools - snapshot.completedTools - snapshot.failedTools);
         seenToolIds.clear();
@@ -204,7 +249,7 @@ export function createLiveTailProjection(activityId: string) {
   }
 
   function getSnapshot(): LiveTailSnapshot {
-    return { ...snapshot, tools: snapshot.tools.map(t => ({ ...t })) };
+    return { ...snapshot, tools: snapshot.tools.map(t => ({ ...t })), childWork: snapshot.childWork.map(t => ({ ...t })) };
   }
   return { accept, getSnapshot };
 }
@@ -246,6 +291,8 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
   const hiddenActiveCount = Math.max(0, snapshot.totalTools - snapshot.completedTools - snapshot.failedTools - snapshot.interruptedTools - active.length);
   const activeCount = Math.max(0, snapshot.totalTools - snapshot.completedTools - snapshot.failedTools - snapshot.interruptedTools);
   const jobs = active.filter(t => t.kind === "subagent" || t.kind === "background" || t.kind === "task");
+  const activeChildren = snapshot.childWork.filter(t => t.state === "running");
+  const childActiveCount = Math.max(0, snapshot.totalChildWork - snapshot.completedChildWork - snapshot.failedChildWork - snapshot.interruptedChildWork);
   const finished = tools.filter(t => t.state !== "running");
   const line = (tool: LiveTailTool, compact = false) => {
     const status = tool.state === "running" ? "[RUN]" : tool.state === "error" ? "[ERR]" : tool.state === "interrupted" ? "[STOP]" : "[OK]";
@@ -263,6 +310,11 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
     add("<b>ACTIVE OPERATIONS</b>\n" + current.map(t => line(t)).join("\n") + (active.length > current.length ? "\n+" + (active.length - current.length) + " other active" : "") + (hiddenActiveCount ? "\n+" + hiddenActiveCount + " untracked in visible history" : ""));
   } else {
     add("<b>CURRENT STATUS</b>\n" + phaseStatus);
+  }
+  if (settings.tools !== "hidden" && (snapshot.totalChildWork > 0)) {
+    const childStatus = "<b>CHILD WORK</b>\n" + snapshot.completedChildWork + " done / " + childActiveCount + " active" + (snapshot.failedChildWork ? " / " + snapshot.failedChildWork + " errors" : "") + (snapshot.interruptedChildWork ? " / " + snapshot.interruptedChildWork + " interrupted" : "");
+    const visibleChildren = activeChildren.slice(-3).map(t => line(t, true));
+    add(childStatus + (visibleChildren.length ? "\n" + visibleChildren.join("\n") : ""));
   }
   if (!snapshot.settled && detail !== "minimal" && settings.tools !== "hidden" && jobs.length > 2) add("<b>ONGOING TASKS</b>\n" + jobs.slice(-4).map(t => safeClean(t.name, 50) || "tool").join("\n"));
   if (detail !== "minimal" && snapshot.plan) {
