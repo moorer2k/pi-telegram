@@ -169,6 +169,7 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
   const expandable = (value: string) => "<blockquote expandable>" + value + "</blockquote>";
   const tools = snapshot.tools;
   const active = tools.filter(t => t.state === "running");
+  const jobs = active.filter(t => t.kind === "subagent" || t.kind === "background" || t.kind === "task");
   const finished = tools.filter(t => t.state !== "running");
   const line = (tool: LiveTailTool, compact = false) => {
     const status = tool.state === "running" ? "[RUN]" : tool.state === "error" ? "[ERR]" : "[OK]";
@@ -185,6 +186,7 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
   } else {
     add("<b>CURRENT STATUS</b>\n" + (snapshot.settled ? "Completed" : "Working"));
   }
+  if (detail !== "minimal" && jobs.length > 2) add("<b>ONGOING TASKS</b>\n" + jobs.slice(0, 4).map(t => clean(t.name, 50)).join("\n"));
   if (detail !== "minimal" && snapshot.plan) {
     add("<b>CURRENT TASK</b>\n" + clean(snapshot.plan.slice(-200), 200));
   }
