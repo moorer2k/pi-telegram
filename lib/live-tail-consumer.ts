@@ -125,10 +125,17 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
       if ((event.type === "reasoning-delta" && event.delta.length > 0) ||
           (event.type === "reasoning-end" && event.text.length > 0) ||
           (event.type === "assistant-segment" && event.placement === "intermediate" && event.text.length > 0) ||
-          event.type === "tool-start") state.hasContent = true;
+          event.type === "tool-start" ||
+          event.type === "compaction-start" ||
+          event.type === "ui-prompt-start") state.hasContent = true;
       if (event.type === "agent-settled") {
         state.settled = true;
         if (!state.hasContent) { clearState(event.activityId); return; }
+      }
+      if (state.failed) {
+        if (state.settled && state.finalDelivered) scheduleAutoDelete(event.activityId, state);
+        else if (state.settled && !state.cleanup) state.cleanup = setTimeout(() => clearState(event.activityId), RETAIN_SETTLED_MS);
+        return;
       }
       if (state.pending) {
         state.dirty = true;
