@@ -175,7 +175,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
         state.retryNotBefore = Date.now() + Math.max(EDIT_INTERVAL_MS, Math.min(120000, typeof result.retryAfterMs === "number" && Number.isFinite(result.retryAfterMs) ? result.retryAfterMs : 3000));
         if (state.settled) state.retryNotBefore = Math.min(state.retryNotBefore, state.editRetryDeadline);
         schedule(id, state.retryNotBefore - Date.now());
-      } else if (state.handle && result.reason === "message-unavailable" && state.missingMessageRecoveries < 1 && state.deliveryTargetKey && state.latest.defaultScope.kind === "target" && state.deliveryTargetKey === `${state.latest.defaultScope.target.chatId}:${state.latest.defaultScope.target.threadId ?? ""}`) {
+      } else if (state.handle && result.reason === "message-unavailable" && state.missingMessageRecoveries < 1 && state.deliveryTargetKey && deliveryContext.defaultScope.kind === "target" && state.deliveryTargetKey === `${deliveryContext.defaultScope.target.chatId}:${deliveryContext.defaultScope.target.threadId ?? ""}`) {
         // Telegram confirms the old message is gone. Recreate once at the same
         // authorized destination; never recreate after an ambiguous send.
         state.missingMessageRecoveries++;
