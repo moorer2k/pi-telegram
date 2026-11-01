@@ -98,6 +98,7 @@ export function createLiveTailProjection(activityId: string) {
   let lastSequence = -1;
   const seenChildIds = new Set<string>();
   const endedChildIds = new Set<string>();
+  const childParents = new Map<string, string>();
   const seenToolIds = new Set<string>();
   const finishedToolIds = new Set<string>();
   let firstTimestampSeen = false;
@@ -177,6 +178,7 @@ export function createLiveTailProjection(activityId: string) {
       case "child-work-start": {
         if (!event.workId || seenChildIds.has(event.workId)) break;
         seenChildIds.add(event.workId);
+        if (event.parentToolCallId) childParents.set(event.workId, event.parentToolCallId);
         snapshot.totalChildWork++;
         snapshot.childWork.push({ id: event.workId, name: safeText(event.label, 70) || event.kind, kind: event.kind, startedAt: event.timestamp, state: "running" });
         if (snapshot.childWork.length > MAX_ACTIVE_TOOLS) {
@@ -194,6 +196,7 @@ export function createLiveTailProjection(activityId: string) {
       case "child-work-end": {
         if (!seenChildIds.has(event.workId) || endedChildIds.has(event.workId)) break;
         endedChildIds.add(event.workId);
+        childParents.delete(event.workId);
         if (event.isError) snapshot.failedChildWork++; else snapshot.completedChildWork++;
         const child = snapshot.childWork.find(t => t.id === event.workId && t.state === "running");
         if (child) {
@@ -239,6 +242,7 @@ export function createLiveTailProjection(activityId: string) {
         snapshot.interruptedChildWork = Math.max(0, snapshot.totalChildWork - snapshot.completedChildWork - snapshot.failedChildWork);
         seenChildIds.clear();
         endedChildIds.clear();
+        childParents.clear();
         // Include running records evicted under extreme concurrency.
         snapshot.interruptedTools = Math.max(0, snapshot.totalTools - snapshot.completedTools - snapshot.failedTools);
         seenToolIds.clear();
