@@ -91,13 +91,17 @@ export function createLiveTailProjection(activityId: string) {
   let lastSequence = -1;
   const seenToolIds = new Set<string>();
   const finishedToolIds = new Set<string>();
+  let firstTimestampSeen = false;
 
   function accept(event: TelegramActivityEvent): boolean {
     if (event.activityId !== activityId || event.sequence <= lastSequence || snapshot.settled) return false;
-    if (!Number.isFinite(event.timestamp) || event.timestamp < 0) return false;
+    if (!Number.isFinite(event.timestamp) || event.timestamp < 0 || !Number.isSafeInteger(event.sequence) || event.sequence < 0) return false;
     lastSequence = event.sequence;
     snapshot.updatedAt = event.timestamp;
-    if (!snapshot.startedAt) snapshot.startedAt = event.timestamp;
+    if (!firstTimestampSeen) {
+      snapshot.startedAt = event.timestamp;
+      firstTimestampSeen = true;
+    }
     switch (event.type) {
       case "reasoning-delta":
         if (reasoningIndex !== undefined && reasoningIndex !== event.contentIndex) {
@@ -132,6 +136,7 @@ export function createLiveTailProjection(activityId: string) {
         }
         break;
       case "tool-update": {
+        if (finishedToolIds.has(event.toolCallId)) break;
         const tool = snapshot.tools.find(t => t.id === event.toolCallId);
         if (tool && tool.state === "running") {
           const update = toolSummary(event.update);
@@ -156,15 +161,17 @@ export function createLiveTailProjection(activityId: string) {
         snapshot.prompt = undefined;
         break;
       case "compaction-end":
-        snapshot.phase = "running";
+        if (snapshot.phase === "compacting") snapshot.phase = "running";
         break;
       case "ui-prompt-start":
         snapshot.phase = "awaiting-input";
         snapshot.prompt = event.title?.slice(0, 120) ?? event.kind;
         break;
       case "ui-prompt-end":
-        snapshot.phase = "running";
-        snapshot.prompt = undefined;
+        if (snapshot.phase === "awaiting-input") {
+          snapshot.phase = "running";
+          snapshot.prompt = undefined;
+        }
         break;
       case "agent-settled":
         snapshot.phase = "finished";
@@ -216,6 +223,8 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
     return true;
   };
   const clean = (value: string, max: number) => escapeTelegramHtml(value.slice(0, max));
+  const elapsedSeconds = Number.isFinite(snapshot.updatedAt - snapshot.startedAt)
+    ? Math.max(0, Math.floor((snapshot.updatedAt - snapshot.startedAt) / 1000)) : 0;
   const safeDuration = (ms: number) => Number.isFinite(ms) && ms >= 0 ? (ms / 1000).toFixed(1) + "s" : "0.0s";
   const expandable = (value: string) => "<blockquote expandable>" + value + "</blockquote>";
   const phaseStatus = snapshot.settled ? (snapshot.failedTools ? "Finished with errors" : snapshot.interruptedTools ? "Interrupted" : "Completed")
@@ -257,7 +266,7 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
   const done = snapshot.completedTools;
   const errors = snapshot.failedTools;
   const interrupted = snapshot.interruptedTools;
-  add("<b>STATUS</b>\n" + done + " done / " + activeCount + " active" + (errors ? " / " + errors + " errors" : "") + (interrupted ? " / " + interrupted + " interrupted" : "") + " / " + Math.floor(Math.max(0, snapshot.updatedAt - snapshot.startedAt) / 1000) + "s");
+  add("<b>STATUS</b>\n" + done + " done / " + activeCount + " active" + (errors ? " / " + errors + " errors" : "") + (interrupted ? " / " + interrupted + " interrupted" : "") + " / " + elapsedSeconds + "s");
   if (reasoningMode !== "hidden" && snapshot.reasoning && detail !== "minimal") {
     const summary = clean(snapshot.reasoning.slice(-240), 240);
     add("<b>REASONING</b>\n" + (reasoningMode === "expanded" ? summary : expandable(summary)));
