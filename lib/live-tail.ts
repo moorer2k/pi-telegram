@@ -43,7 +43,7 @@ function safePreview(value: unknown, max = 160): string | undefined {
   if (typeof value !== "string") return undefined;
   const text = value.replace(/\s+/g, " ").trim();
   if (!text) return undefined;
-  const forbidden = ["password", "passwd", "secret", "token", "api_key", "apikey", "authorization", "bearer ", "private_key", "credential", ".env", "--key", "--password"];
+  const forbidden = ["password", "passwd", "secret", "token", "api_key", "apikey", "authorization", "bearer ", "private_key", "credential", ".env", "--key", "--password", "aws_access_key", "session_key"];
   if (forbidden.some(word => text.toLowerCase().includes(word))) return undefined;
   return text.slice(0, max);
 }
@@ -186,7 +186,7 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
   } else {
     add("<b>CURRENT STATUS</b>\n" + (snapshot.settled ? "Completed" : "Working"));
   }
-  if (detail !== "minimal" && jobs.length > 2) add("<b>ONGOING TASKS</b>\n" + jobs.slice(0, 4).map(t => clean(t.name, 50)).join("\n"));
+  if (detail !== "minimal" && settings.tools !== "hidden" && jobs.length > 2) add("<b>ONGOING TASKS</b>\n" + jobs.slice(0, 4).map(t => clean(t.name, 50)).join("\n"));
   if (detail !== "minimal" && snapshot.plan) {
     add("<b>CURRENT TASK</b>\n" + clean(snapshot.plan.slice(-200), 200));
   }
