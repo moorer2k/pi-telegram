@@ -392,3 +392,23 @@ test("renderer screens sensitive plan and reasoning in snapshots", () => {
   const output = renderLiveTail(state, {detail:"detailed",reasoning:"expanded"});
   assert.doesNotMatch(output, /exposed/);
 });
+
+test("renderer rejects unsafe tool names in externally modified snapshots", () => {
+  const tail = createLiveTailProjection("unsafe-label");
+  tail.accept({activityId:"unsafe-label",source:"telegram",timestamp:1,sequence:1,type:"tool-start",toolCallId:"a",toolName:"terminal",args:{}});
+  const state = tail.getSnapshot();
+  state.tools[0]!.name = "terminal --token exposed";
+  const output = renderLiveTail(state, {detail:"detailed"});
+  assert.doesNotMatch(output, /exposed/);
+  assert.match(output, /<code>tool<\/code>/);
+});
+
+test("renderer rejects unsafe prompt titles in externally modified snapshots", () => {
+  const tail = createLiveTailProjection("unsafe-prompt");
+  tail.accept({activityId:"unsafe-prompt",source:"telegram",timestamp:1,sequence:1,type:"ui-prompt-start",kind:"input",title:"Enter value"});
+  const state = tail.getSnapshot();
+  state.prompt = "Authorization: exposed";
+  const output = renderLiveTail(state);
+  assert.doesNotMatch(output, /exposed/);
+  assert.match(output, /Input requested/);
+});
