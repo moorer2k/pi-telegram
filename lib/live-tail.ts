@@ -103,6 +103,7 @@ export function createLiveTailProjection(activityId: string) {
   const MAX_CHILD_HISTORY = 24;
   const endedChildIds = new Set<string>();
   const seenToolIds = new Set<string>();
+  const childActiveByKind = { subagent: 0, background: 0 };
   const finishedToolIds = new Set<string>();
   let firstTimestampSeen = false;
   const safeText = (value: string, max: number) => safePreview(value, max) ?? "";
@@ -184,6 +185,7 @@ export function createLiveTailProjection(activityId: string) {
         snapshot.totalChildWork++;
         if (event.kind === "subagent") snapshot.subagentWorkTotal++;
         else snapshot.backgroundWorkTotal++;
+        childActiveByKind[event.kind]++;
         snapshot.childWork.push({ id: event.workId, name: safeText(event.label, 70) || event.kind, kind: event.kind, parentToolCallId: event.parentToolCallId, startedAt: event.timestamp, state: "running" });
         let finishedChildren = snapshot.childWork.reduce((count, child) => count + (child.state !== "running" ? 1 : 0), 0);
         while (finishedChildren > MAX_CHILD_HISTORY) {
@@ -208,6 +210,8 @@ export function createLiveTailProjection(activityId: string) {
         if (!seenChildIds.has(event.workId) || endedChildIds.has(event.workId)) break;
         endedChildIds.add(event.workId);
         if (event.isError) snapshot.failedChildWork++; else snapshot.completedChildWork++;
+        const endedKind = snapshot.childWork.find(t => t.id === event.workId)?.kind;
+        if (endedKind === "subagent" || endedKind === "background") childActiveByKind[endedKind] = Math.max(0, childActiveByKind[endedKind] - 1);
         const child = snapshot.childWork.find(t => t.id === event.workId && t.state === "running");
         if (child) {
           child.state = event.isError ? "error" : "done";
@@ -255,6 +259,8 @@ export function createLiveTailProjection(activityId: string) {
           }
         }
         snapshot.interruptedChildWork = Math.max(0, snapshot.totalChildWork - snapshot.completedChildWork - snapshot.failedChildWork);
+        childActiveByKind.subagent = 0;
+        childActiveByKind.background = 0;
         seenChildIds.clear();
         endedChildIds.clear();
         // Include running records evicted under extreme concurrency.
