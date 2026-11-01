@@ -29,6 +29,7 @@ interface LiveTailState {
   finalDelivered: boolean;
   revision: number;
   cleanupDeadline?: number;
+  editFailures: number;
 }
 
 export interface LiveTailConsumer {
@@ -95,6 +96,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
         state.handle = result.value;
         state.lastText = text;
         state.retryNotBefore = 0;
+        state.editFailures = 0;
         if (state.revision !== sentRevision) state.dirty = true;
         // A newer event may have arrived while this delivery was in flight.
         // Preserve dirty=true in that case so the latest projection is flushed.
@@ -102,6 +104,13 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
         if (result.partial) state.handle = result.partial;
         state.dirty = true;
         state.retryNotBefore = Date.now() + Math.max(EDIT_INTERVAL_MS, Math.min(120000, typeof result.retryAfterMs === "number" && Number.isFinite(result.retryAfterMs) ? result.retryAfterMs : 3000));
+        schedule(id, state.retryNotBefore - Date.now());
+      } else if (state.handle && result.reason !== "runtime-unavailable" && result.reason !== "unauthorized" && state.editFailures < 3) {
+        // Editing an acknowledged message is safe to retry: it cannot create duplicates.
+        // Never apply this recovery path to an unacknowledged initial send.
+        state.editFailures++;
+        state.dirty = true;
+        state.retryNotBefore = Date.now() + Math.min(15000, 1500 * 2 ** state.editFailures);
         schedule(id, state.retryNotBefore - Date.now());
       } else {
         // Preserve any acknowledged message handle for final cleanup.
@@ -111,9 +120,16 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
         state.dirty = false;
       }
     } catch {
-      // Transport exceptions are ambiguous; retrying a send could duplicate the message.
-      state.failed = true;
-      state.dirty = false;
+      // An acknowledged edit is idempotent; an uncertain initial send is not.
+      if (state.handle && state.editFailures < 3) {
+        state.editFailures++;
+        state.dirty = true;
+        state.retryNotBefore = Date.now() + Math.min(15000, 1500 * 2 ** state.editFailures);
+        schedule(id, state.retryNotBefore - Date.now());
+      } else {
+        state.failed = true;
+        state.dirty = false;
+      }
     } finally {
       state.pending = false;
       if (closed || activities.get(id) !== state) return;
@@ -154,6 +170,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
           pending: false, dirty: false, failed: false, settled: false, lastFlushStartedAt: 0, retryNotBefore: 0, hasContent: false, finalDelivered: false,
           replyToMessageId: event.replyToMessageId,
           revision: 0,
+          editFailures: 0,
         };
         activities.set(event.activityId, state);
       }
