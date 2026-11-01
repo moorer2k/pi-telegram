@@ -249,6 +249,7 @@ export interface TelegramMenuActionRuntimeDeps<
   TContext,
   TModel extends MenuModel = MenuModel,
 > extends TelegramMenuMessageRuntimeDeps {
+  deleteMessage?: (chatId: number, messageId: number) => Promise<void>;
   getModelMenuState: (
     chatId: number,
     ctx: TContext,
