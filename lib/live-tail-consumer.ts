@@ -74,8 +74,18 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
 
   async function flush(id: string): Promise<void> {
     const state = activities.get(id);
-    if (!state || closed || state.pending || state.failed || !state.latest) return;
+    if (!state || closed || state.pending || state.failed || state.deliveryPendingDeletion || !state.latest) return;
     if (state.retryNotBefore > Date.now()) {
+      if (state.settled && state.editRetryDeadline !== undefined && Date.now() >= state.editRetryDeadline) {
+        state.failed = true;
+        state.dirty = false;
+        if (state.finalDelivered) scheduleAutoDelete(id, state);
+        else if (!state.cleanup) {
+          state.cleanupDeadline ??= Date.now() + RETAIN_SETTLED_MS;
+          state.cleanup = setTimeout(() => clearState(id), Math.max(0, state.cleanupDeadline - Date.now()));
+        }
+        return;
+      }
       schedule(id, state.retryNotBefore - Date.now());
       return;
     }
@@ -134,6 +144,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
         }
         state.dirty = true;
         state.retryNotBefore = Date.now() + Math.max(EDIT_INTERVAL_MS, Math.min(120000, typeof result.retryAfterMs === "number" && Number.isFinite(result.retryAfterMs) ? result.retryAfterMs : 3000));
+        if (state.settled) state.retryNotBefore = Math.min(state.retryNotBefore, state.editRetryDeadline);
         schedule(id, state.retryNotBefore - Date.now());
       } else if (state.handle && result.reason !== "runtime-unavailable" && result.reason !== "unauthorized" && result.reason !== "not-found" && state.editFailures < 3) {
         // Editing an acknowledged message is safe to retry: it cannot create duplicates.
