@@ -173,6 +173,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
       if (state.failed) {
         if (state.settled && state.finalDelivered) {
           state.dirty = false;
+          if (state.timer) { clearTimeout(state.timer); state.timer = undefined; }
           scheduleAutoDelete(event.activityId, state);
         }
         else if (state.settled && !state.cleanup) {
