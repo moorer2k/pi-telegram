@@ -64,7 +64,14 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
     const state = activities.get(id);
     if (!state || closed || state.failed) return;
     if (state.cleanup) { clearTimeout(state.cleanup); state.cleanup = undefined; }
+    if (state.settled && state.editRetryDeadline !== undefined && Date.now() >= state.editRetryDeadline) {
+      state.failed = true;
+      state.dirty = false;
+      if (state.finalDelivered) scheduleAutoDelete(id, state);
+      return;
+    }
     delay = Math.max(0, Number.isFinite(delay) ? delay : EDIT_INTERVAL_MS, state.retryNotBefore - Date.now());
+    if (state.settled && state.editRetryDeadline !== undefined) delay = Math.min(delay, Math.max(0, state.editRetryDeadline - Date.now()));
     if (state.timer) clearTimeout(state.timer);
     state.timer = setTimeout(() => {
       state.timer = undefined;
