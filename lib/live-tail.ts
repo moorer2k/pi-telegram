@@ -225,7 +225,7 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
   }
   if (settings.tools !== "hidden" && settings.tools !== "active" && finished.length) {
     const recent = finished.slice(-(detail === "detailed" ? 5 : 2));
-    add("<b>RECENT OPERATIONS</b>\n" + recent.slice(-2).map(t => line(t, true)).join("\n"));
+    add("<b>RECENT OPERATIONS</b>\n" + recent.map(t => line(t, true)).join("\n"));
     if (detail === "detailed" && finished.length > 2) {
       const history = finished.slice(-12, -2);
       if (history.length) add("<i>Earlier operations (" + history.length + ")</i>\n" + expandable(history.map(t => line(t, true)).join("\n")));
