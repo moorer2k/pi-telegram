@@ -31,6 +31,7 @@ interface LiveTailState {
   cleanupDeadline?: number;
   editFailures: number;
   initialSendAttempted: boolean;
+  editAttemptText?: string;
 }
 
 export interface LiveTailConsumer {
@@ -89,6 +90,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
         return;
       }
       const view = { text, parseMode: "html" as const };
+      state.editAttemptText = text;
       if (!state.handle && state.initialSendAttempted) {
         state.failed = true;
         return;
