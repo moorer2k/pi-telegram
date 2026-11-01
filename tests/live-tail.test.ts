@@ -228,3 +228,46 @@ test("finished operation IDs cannot be completed twice", () => {
   assert.equal(tail.getSnapshot().failedTools, 1);
   assert.equal(tail.getSnapshot().completedTools, 0);
 });
+
+test("zero timestamp remains the start of the activity", () => {
+  const tail = createLiveTailProjection("zero-start");
+  tail.accept({activityId:"zero-start",source:"telegram",timestamp:0,sequence:1,type:"agent-start"});
+  tail.accept({activityId:"zero-start",source:"telegram",timestamp:5000,sequence:2,type:"tool-start",toolCallId:"a",toolName:"terminal",args:{}});
+  assert.equal(tail.getSnapshot().startedAt, 0);
+  assert.match(renderLiveTail(tail.getSnapshot()), /5s/);
+});
+
+test("invalid event sequence numbers do not corrupt ordering", () => {
+  const tail = createLiveTailProjection("bad-sequence");
+  for (const sequence of [-1, 0.5, NaN, Infinity]) {
+    assert.equal(tail.accept({activityId:"bad-sequence",source:"telegram",timestamp:1,sequence,type:"agent-start"}), false);
+  }
+  assert.equal(tail.accept({activityId:"bad-sequence",source:"telegram",timestamp:2,sequence:1,type:"agent-start"}), true);
+});
+
+test("unmatched lifecycle completion does not erase a newer phase", () => {
+  const tail = createLiveTailProjection("overlap");
+  tail.accept({activityId:"overlap",source:"telegram",timestamp:1,sequence:1,type:"ui-prompt-start",kind:"confirm",title:"Continue?"});
+  tail.accept({activityId:"overlap",source:"telegram",timestamp:2,sequence:2,type:"compaction-end",reason:"manual"});
+  assert.equal(tail.getSnapshot().phase, "awaiting-input");
+  tail.accept({activityId:"overlap",source:"telegram",timestamp:3,sequence:3,type:"compaction-start",reason:"manual"});
+  tail.accept({activityId:"overlap",source:"telegram",timestamp:4,sequence:4,type:"ui-prompt-end"});
+  assert.equal(tail.getSnapshot().phase, "compacting");
+});
+
+test("snapshot modifications cannot mutate internal tool records", () => {
+  const tail = createLiveTailProjection("defensive");
+  tail.accept({activityId:"defensive",source:"telegram",timestamp:1,sequence:1,type:"tool-start",toolCallId:"a",toolName:"terminal",args:{}});
+  const state = tail.getSnapshot();
+  state.tools[0]!.name = "tampered";
+  state.tools.pop();
+  assert.equal(tail.getSnapshot().tools[0]?.name, "terminal");
+});
+
+test("non-finite elapsed time does not leak NaN or Infinity into Telegram HTML", () => {
+  const tail = createLiveTailProjection("elapsed");
+  tail.accept({activityId:"elapsed",source:"telegram",timestamp:1,sequence:1,type:"agent-start"});
+  const state = tail.getSnapshot();
+  state.updatedAt = Infinity;
+  assert.doesNotMatch(renderLiveTail(state), /NaN|Infinity/);
+});
