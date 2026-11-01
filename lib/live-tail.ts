@@ -255,6 +255,10 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
   if (detail !== "minimal" && snapshot.plan) {
     add("<b>CURRENT TASK</b>\n" + clean(snapshot.plan.slice(-200), 200));
   }
+  const done = snapshot.completedTools;
+  const errors = snapshot.failedTools;
+  const interrupted = snapshot.interruptedTools;
+  add("<b>STATUS</b>\n" + done + " done / " + activeCount + " active" + (errors ? " / " + errors + " errors" : "") + (interrupted ? " / " + interrupted + " interrupted" : "") + " / " + elapsedSeconds + "s");
   if (settings.tools !== "hidden" && settings.tools !== "active" && finished.length) {
     const recent = finished.slice(-(detail === "detailed" ? 5 : 2));
     add("<b>RECENT OPERATIONS</b>\n" + recent.map(t => line(t, detail !== "detailed")).join("\n"));
@@ -263,10 +267,6 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
       if (history.length) add("<i>Earlier operations (" + history.length + ")</i>\n" + expandable(history.map(t => line(t, true)).join("\n")));
     }
   }
-  const done = snapshot.completedTools;
-  const errors = snapshot.failedTools;
-  const interrupted = snapshot.interruptedTools;
-  add("<b>STATUS</b>\n" + done + " done / " + activeCount + " active" + (errors ? " / " + errors + " errors" : "") + (interrupted ? " / " + interrupted + " interrupted" : "") + " / " + elapsedSeconds + "s");
   if (reasoningMode !== "hidden" && snapshot.reasoning && detail !== "minimal") {
     const summary = clean(snapshot.reasoning.slice(-240), 240);
     add("<b>REASONING</b>\n" + (reasoningMode === "expanded" ? summary : expandable(summary)));
