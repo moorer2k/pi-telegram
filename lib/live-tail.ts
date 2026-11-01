@@ -95,6 +95,7 @@ export function createLiveTailProjection(activityId: string) {
   const finishedToolIds = new Set<string>();
   let firstTimestampSeen = false;
   const safeText = (value: string, max: number) => safePreview(value, max) ?? "";
+  const safeReasoning = (value: string) => safeText(value, MAX_REASONING);
 
   function accept(event: TelegramActivityEvent): boolean {
     if (event.activityId !== activityId || event.sequence <= lastSequence || snapshot.settled) return false;
@@ -112,7 +113,7 @@ export function createLiveTailProjection(activityId: string) {
           snapshot.reasoning = "";
         }
         reasoningIndex = event.contentIndex;
-        snapshot.reasoning = appendBounded(snapshot.reasoning, safeText(event.delta, MAX_REASONING), MAX_REASONING);
+        snapshot.reasoning = safeReasoning(appendBounded(snapshot.reasoning, event.delta, MAX_REASONING));
         break;
       case "reasoning-end":
         if (reasoningIndex !== undefined && reasoningIndex !== event.contentIndex && snapshot.reasoning) {
@@ -226,6 +227,7 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
     return true;
   };
   const clean = (value: string, max: number) => escapeTelegramHtml(value.slice(0, max));
+  const safeClean = (value: string, max: number) => clean(safePreview(value, max) ?? "", max);
   const elapsedSeconds = Number.isFinite(snapshot.updatedAt - snapshot.startedAt)
     ? Math.max(0, Math.floor((snapshot.updatedAt - snapshot.startedAt) / 1000)) : 0;
   const safeDuration = (ms: number) => Number.isFinite(ms) && ms >= 0 ? (ms / 1000).toFixed(1) + "s" : "0.0s";
@@ -240,10 +242,10 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
   const finished = tools.filter(t => t.state !== "running");
   const line = (tool: LiveTailTool, compact = false) => {
     const status = tool.state === "running" ? "[RUN]" : tool.state === "error" ? "[ERR]" : tool.state === "interrupted" ? "[STOP]" : "[OK]";
-    const command = tool.command ? " " + clean(tool.command, compact ? 90 : 160) : "";
-    const update = !compact && tool.update ? "\n" + clean(tool.update, 90) : "";
+    const command = tool.command ? " " + safeClean(tool.command, compact ? 90 : 160) : "";
+    const update = !compact && tool.update ? "\n" + safeClean(tool.update, 90) : "";
     const duration = tool.elapsedMs === undefined ? "" : " (" + safeDuration(tool.elapsedMs) + ")";
-    const result = !compact && tool.state !== "running" && tool.result ? "\n" + clean(tool.result, 90) : "";
+    const result = !compact && tool.state !== "running" && tool.result ? "\n" + safeClean(tool.result, 90) : "";
     return status + " <code>" + clean(tool.name, 50) + command + "</code>" + duration + update + result;
   };
   if (detail === "detailed") add("<b>VENOM // LIVE TAIL</b>");
@@ -257,7 +259,7 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
   }
   if (!snapshot.settled && detail !== "minimal" && settings.tools !== "hidden" && jobs.length > 2) add("<b>ONGOING TASKS</b>\n" + jobs.slice(-4).map(t => clean(t.name, 50)).join("\n"));
   if (detail !== "minimal" && snapshot.plan) {
-    add("<b>CURRENT TASK</b>\n" + clean(snapshot.plan.slice(-200), 200));
+    add("<b>CURRENT TASK</b>\n" + safeClean(snapshot.plan.slice(-200), 200));
   }
   const done = snapshot.completedTools;
   const errors = snapshot.failedTools;
@@ -272,11 +274,11 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
     }
   }
   if (reasoningMode !== "hidden" && snapshot.reasoning && detail !== "minimal") {
-    const summary = clean(snapshot.reasoning.slice(-240), 240);
+    const summary = safeClean(snapshot.reasoning.slice(-240), 240);
     add("<b>REASONING</b>\n" + (reasoningMode === "expanded" ? summary : expandable(summary)));
   }
   if (reasoningMode !== "hidden" && detail === "detailed" && snapshot.earlierReasoning) {
-    add("<i>Earlier reasoning</i>\n" + expandable(clean(snapshot.earlierReasoning.slice(-350), 350)));
+    add("<i>Earlier reasoning</i>\n" + expandable(safeClean(snapshot.earlierReasoning.slice(-350), 350)));
   }
   return parts.join("\n\n");
 }
