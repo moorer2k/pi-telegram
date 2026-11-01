@@ -53,6 +53,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
     if (!state) return;
     if (state.timer) clearTimeout(state.timer);
     if (state.cleanup) clearTimeout(state.cleanup);
+    state.editRetryDeadline = undefined;
     state.deliveryPendingDeletion = false;
     state.cleanupDeadline = undefined;
     state.deliveryGeneration++;
