@@ -34,6 +34,7 @@ interface LiveTailState {
   lastActivityAt: number;
   deliveryTargetKey?: string;
   deliveredContext?: TelegramActivityContext;
+  deliveryGeneration: number;
 }
 
 export interface LiveTailConsumer {
@@ -51,6 +52,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
     if (state.timer) clearTimeout(state.timer);
     if (state.cleanup) clearTimeout(state.cleanup);
     state.cleanupDeadline = undefined;
+    state.deliveryGeneration++;
     activities.delete(id);
   }
 
@@ -79,6 +81,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
       return;
     }
     state.pending = true;
+    const generation = state.deliveryGeneration;
     state.lastFlushStartedAt = Date.now();
     state.dirty = false;
     const sentRevision = state.revision;
@@ -103,7 +106,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
       const result = state.handle
         ? await deliveryContext.edit(state.handle, view)
         : await deliveryContext.send(view, { replyToMessageId: state.replyToMessageId });
-      if (closed || activities.get(id) !== state) return;
+      if (closed || activities.get(id) !== state || state.deliveryGeneration !== generation) return;
       if (result.ok) {
         state.handle = result.value;
         state.deliveredContext = deliveryContext;
@@ -197,12 +200,10 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
           editFailures: 0,
           initialSendAttempted: false,
           lastActivityAt: Date.now(),
+          deliveryGeneration: 0,
         };
         activities.set(event.activityId, state);
       }
-      if (!state.projection.accept(event)) return;
-      state.revision++;
-      state.lastActivityAt = Date.now();
       const target = event.target ?? (ctx.defaultScope.kind === "target" ? ctx.defaultScope.target : undefined);
       const targetKey = target ? `${target.chatId}:${target.threadId ?? ""}` : undefined;
       if (state.deliveryTargetKey && targetKey && state.deliveryTargetKey !== targetKey) {
@@ -215,6 +216,9 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
         clearState(event.activityId);
         return;
       }
+      if (!state.projection.accept(event)) return;
+      state.revision++;
+      state.lastActivityAt = Date.now();
       if (targetKey) state.deliveryTargetKey = targetKey;
       state.latest = ctx;
       if ((event.type === "reasoning-delta" && event.delta.length > 0) ||
