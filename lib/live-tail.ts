@@ -96,6 +96,7 @@ export function createLiveTailProjection(activityId: string) {
   let firstTimestampSeen = false;
   const safeText = (value: string, max: number) => safePreview(value, max) ?? "";
   const safeReasoning = (value: string) => safeText(value, MAX_REASONING);
+  let reasoningRedacted = false;
 
   function accept(event: TelegramActivityEvent): boolean {
     if (event.activityId !== activityId || event.sequence <= lastSequence || snapshot.settled) return false;
@@ -111,9 +112,14 @@ export function createLiveTailProjection(activityId: string) {
         if (reasoningIndex !== undefined && reasoningIndex !== event.contentIndex) {
           snapshot.earlierReasoning = appendBounded(snapshot.earlierReasoning, snapshot.reasoning + "\n", MAX_EARLIER);
           snapshot.reasoning = "";
+          reasoningRedacted = false;
         }
         reasoningIndex = event.contentIndex;
-        snapshot.reasoning = safeReasoning(appendBounded(snapshot.reasoning, event.delta, MAX_REASONING));
+        const combinedReasoning = appendBounded(snapshot.reasoning, event.delta, MAX_REASONING);
+        if (reasoningRedacted || (combinedReasoning && !safeReasoning(combinedReasoning))) {
+          snapshot.reasoning = "";
+          reasoningRedacted = true;
+        } else snapshot.reasoning = safeReasoning(combinedReasoning);
         break;
       case "reasoning-end":
         if (reasoningIndex !== undefined && reasoningIndex !== event.contentIndex && snapshot.reasoning) {
@@ -121,6 +127,7 @@ export function createLiveTailProjection(activityId: string) {
         }
         reasoningIndex = event.contentIndex;
         snapshot.reasoning = safeText(event.text.slice(-MAX_REASONING), MAX_REASONING);
+        reasoningRedacted = false;
         break;
       case "assistant-segment":
         if (event.placement === "intermediate") snapshot.plan = safeText(event.text.slice(-MAX_PLAN), MAX_PLAN);
