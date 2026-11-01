@@ -22,7 +22,6 @@ interface LiveTailState {
   pending: boolean;
   dirty: boolean;
   failed: boolean;
-  failures: number;
   settled: boolean;
   lastFlushStartedAt: number;
   retryNotBefore: number;
@@ -77,7 +76,6 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
       if (result.ok) {
         state.handle = result.value;
         state.lastText = text;
-        state.failures = 0;
       } else if (result.reason === "rate-limited") {
         state.dirty = true;
         state.retryNotBefore = Date.now() + Math.max(EDIT_INTERVAL_MS, result.retryAfterMs ?? 3000);
@@ -114,7 +112,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
         }
         state = {
           projection: createLiveTailProjection(event.activityId),
-          pending: false, dirty: false, failed: false, failures: 0, settled: false, lastFlushStartedAt: 0, retryNotBefore: 0, hasContent: false, finalDelivered: false,
+          pending: false, dirty: false, failed: false, settled: false, lastFlushStartedAt: 0, retryNotBefore: 0, hasContent: false, finalDelivered: false,
           replyToMessageId: event.replyToMessageId,
         };
         activities.set(event.activityId, state);
