@@ -156,9 +156,10 @@ export function createLiveTailProjection(activityId: string) {
           if (tool.state === "running") {
             tool.state = "error";
             tool.elapsedMs = Math.max(0, event.timestamp - tool.startedAt);
-            snapshot.failedTools++;
           }
         }
+        // Include running records evicted under extreme concurrency.
+        snapshot.failedTools = Math.max(snapshot.failedTools, snapshot.totalTools - snapshot.completedTools);
         break;
     }
     return true;
