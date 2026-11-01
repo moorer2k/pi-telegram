@@ -268,7 +268,11 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
         // The edit completion path re-arms deletion after pending work drains.
         return;
       }
-      if (state.handle && state.latest) void state.latest.delete(state.handle).catch(() => {});
+      if (state.handle && state.latest) {
+        const context = state.latest;
+        const handle = state.handle;
+        void context.delete(handle).catch(() => {});
+      }
       clearState(id);
     }, Math.max(0, state.cleanupDeadline - Date.now()));
   }
