@@ -289,6 +289,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
       if (state.handle && (state.deliveredContext ?? state.latest)) {
         const context = (state.deliveredContext ?? state.latest)!;
         const handle = state.handle;
+        state.cleanup = undefined;
         state.deliveryPendingDeletion = true;
         // Preserve the state until deletion completes so a second cleanup cannot race it.
         void context.delete(handle).catch(() => {}).finally(() => {
