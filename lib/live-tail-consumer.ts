@@ -22,6 +22,7 @@ interface LiveTailState {
   pending: boolean;
   dirty: boolean;
   failed: boolean;
+  failures: number;
   settled: boolean;
   lastFlushStartedAt: number;
   retryNotBefore: number;
@@ -76,15 +77,17 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
       if (result.ok) {
         state.handle = result.value;
         state.lastText = text;
+        state.failures = 0;
       } else if (result.reason === "rate-limited") {
         state.dirty = true;
         state.retryNotBefore = Date.now() + Math.max(EDIT_INTERVAL_MS, result.retryAfterMs ?? 3000);
         schedule(id, state.retryNotBefore - Date.now());
       } else {
-        // No replacement sends on unknown ACK, stale authority, or invalid edits.
+        // Do not create duplicate messages on an uncertain send/edit acknowledgement.
         state.failed = true;
       }
     } catch {
+      // Transport exceptions are ambiguous; retrying a send could duplicate the message.
       state.failed = true;
     } finally {
       state.pending = false;
@@ -111,7 +114,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
         }
         state = {
           projection: createLiveTailProjection(event.activityId),
-          pending: false, dirty: false, failed: false, settled: false, lastFlushStartedAt: 0, retryNotBefore: 0, hasContent: false, finalDelivered: false,
+          pending: false, dirty: false, failed: false, failures: 0, settled: false, lastFlushStartedAt: 0, retryNotBefore: 0, hasContent: false, finalDelivered: false,
           replyToMessageId: event.replyToMessageId,
         };
         activities.set(event.activityId, state);
