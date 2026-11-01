@@ -316,9 +316,15 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
       if (closed || activities.get(id) !== state) return;
       if (state.pending || state.timer || state.dirty) {
         state.cleanup = undefined;
-        // The active delivery or scheduled flush will re-arm cleanup.
-        // A dirty state without either mechanism needs its own flush.
-        if (!state.pending && !state.timer && state.dirty && !state.failed) schedule(id, 0);
+        // Active deliveries and scheduled flushes re-arm cleanup. A terminal
+        // failure must not leave a dirty state blocking deletion forever.
+        if (state.failed) {
+          state.dirty = false;
+          if (state.timer) { clearTimeout(state.timer); state.timer = undefined; }
+          if (!state.pending) scheduleAutoDelete(id, state);
+        } else if (!state.pending && !state.timer && state.dirty) {
+          schedule(id, 0);
+        }
         return;
       }
       if (state.handle && (state.deliveredContext ?? state.latest)) {
