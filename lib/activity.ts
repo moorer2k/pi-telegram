@@ -116,7 +116,7 @@ export function readTelegramChildWorkSignal(value: unknown): TelegramChildWorkSi
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
   const signal = raw as Record<string, unknown>;
   const workId = signal.workId;
-  if (typeof workId !== "string" || workId.length === 0 || workId.length > 160) return undefined;
+  if (typeof workId !== "string" || workId.length === 0 || workId.length > 160 || !/^[a-zA-Z0-9][a-zA-Z0-9_.:-]*$/.test(workId)) return undefined;
   if (signal.phase === "start" && (signal.kind === "subagent" || signal.kind === "background") &&
       typeof signal.label === "string" && signal.label.length > 0) {
     return { phase: "start", workId, kind: signal.kind, label: signal.label.slice(0, 160) };
