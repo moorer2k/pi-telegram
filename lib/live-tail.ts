@@ -181,10 +181,12 @@ export function createLiveTailProjection(activityId: string) {
         seenChildIds.add(event.workId);
         snapshot.totalChildWork++;
         snapshot.childWork.push({ id: event.workId, name: safeText(event.label, 70) || event.kind, kind: event.kind, parentToolCallId: event.parentToolCallId, startedAt: event.timestamp, state: "running" });
-        while (snapshot.childWork.filter(t => t.state !== "running").length > MAX_CHILD_HISTORY) {
+        let finishedChildren = snapshot.childWork.reduce((count, child) => count + (child.state !== "running" ? 1 : 0), 0);
+        while (finishedChildren > MAX_CHILD_HISTORY) {
           const oldestFinished = snapshot.childWork.findIndex(t => t.state !== "running");
           if (oldestFinished < 0) break;
           snapshot.childWork.splice(oldestFinished, 1);
+          finishedChildren--;
         }
         if (snapshot.childWork.length > MAX_ACTIVE_TOOLS) {
           const oldestFinished = snapshot.childWork.findIndex(t => t.state !== "running");
