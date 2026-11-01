@@ -97,7 +97,7 @@ export function createLiveTailProjection(activityId: string) {
     if (event.activityId !== activityId || event.sequence <= lastSequence || snapshot.settled) return false;
     if (!Number.isFinite(event.timestamp) || event.timestamp < 0 || !Number.isSafeInteger(event.sequence) || event.sequence < 0) return false;
     lastSequence = event.sequence;
-    snapshot.updatedAt = event.timestamp;
+    snapshot.updatedAt = Math.max(snapshot.updatedAt, event.timestamp);
     if (!firstTimestampSeen) {
       snapshot.startedAt = event.timestamp;
       firstTimestampSeen = true;
