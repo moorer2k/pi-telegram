@@ -95,6 +95,42 @@ export type TelegramActivityPayload =
   | { type: "agent-end" }
   | { type: "agent-settled" };
 
+/**
+ * Explicit lifecycle metadata for cooperating Pi tools. No child work is inferred
+ * from tool names or arbitrary output text.
+ *
+ * A tool may expose `liveTailChildWork` on its args, partial result or result,
+ * or inside the result's `details` object.
+ */
+export type TelegramChildWorkSignal =
+  | { phase: "start"; workId: string; kind: "subagent" | "background"; label: string }
+  | { phase: "update"; workId: string; message: string }
+  | { phase: "end"; workId: string; isError: boolean; result?: string };
+
+export function readTelegramChildWorkSignal(value: unknown): TelegramChildWorkSignal | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const details = record.details && typeof record.details === "object" && !Array.isArray(record.details)
+    ? record.details as Record<string, unknown> : undefined;
+  const raw = record.liveTailChildWork ?? details?.liveTailChildWork;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const signal = raw as Record<string, unknown>;
+  const workId = signal.workId;
+  if (typeof workId !== "string" || workId.length === 0 || workId.length > 160) return undefined;
+  if (signal.phase === "start" && (signal.kind === "subagent" || signal.kind === "background") &&
+      typeof signal.label === "string" && signal.label.length > 0) {
+    return { phase: "start", workId, kind: signal.kind, label: signal.label.slice(0, 160) };
+  }
+  if (signal.phase === "update" && typeof signal.message === "string") {
+    return { phase: "update", workId, message: signal.message.slice(0, 512) };
+  }
+  if (signal.phase === "end" && typeof signal.isError === "boolean") {
+    return { phase: "end", workId, isError: signal.isError,
+      ...(typeof signal.result === "string" ? { result: signal.result.slice(0, 512) } : {}) };
+  }
+  return undefined;
+}
+
 export type TelegramActivityEvent = TelegramActivityEnvelope &
   TelegramActivityPayload;
 
