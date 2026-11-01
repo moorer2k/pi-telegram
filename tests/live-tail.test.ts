@@ -271,3 +271,15 @@ test("non-finite elapsed time does not leak NaN or Infinity into Telegram HTML",
   state.updatedAt = Infinity;
   assert.doesNotMatch(renderLiveTail(state), /NaN|Infinity/);
 });
+
+test("status remains visible when detailed history approaches the Telegram budget", () => {
+  const tail = createLiveTailProjection("budget-status");
+  for (let i = 0; i < 24; i++) {
+    tail.accept({activityId:"budget-status",source:"telegram",timestamp:i*2+1,sequence:i*2+1,type:"tool-start",toolCallId:String(i),toolName:"tool_"+i,args:{path:"a".repeat(180)}});
+    tail.accept({activityId:"budget-status",source:"telegram",timestamp:i*2+2,sequence:i*2+2,type:"tool-end",toolCallId:String(i),toolName:"tool_"+i,result:"b".repeat(120),isError:false});
+  }
+  const output = renderLiveTail(tail.getSnapshot(), {detail:"detailed",reasoning:"expanded",tools:"recent"});
+  assert.match(output, /<b>STATUS<\/b>/);
+  assert.match(output, /24 done/);
+  assert.ok(output.length <= 3800);
+});
