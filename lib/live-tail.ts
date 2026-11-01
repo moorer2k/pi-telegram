@@ -48,6 +48,7 @@ function safePreview(value: unknown, max = 160): string | undefined {
   const text = value.replace(/\s+/g, " ").trim();
   // Shell previews can include literal values and URLs containing credentials.
   if (/(?:[a-z][a-z0-9+.-]*:\/\/[^\s/@]+:[^\s/@]+@|(?:^|\s)(?:-p|--password|--token|--secret)(?:=|\s+)|(?:^|\s)[A-Z][A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD)\s*=)/i.test(text)) return undefined;
+  if (/(?:x-api-key|x-auth-token|authorization\s*[:=]|(?:^|\s)--(?:api-key|access-key|client-secret|auth|credential)(?:=|\s+))/i.test(text)) return undefined;
   if (!text) return undefined;
   const forbidden = ["password", "passwd", "secret", "token", "api_key", "apikey", "authorization", "bearer ", "private_key", "credential", ".env", "--key", "--password", "aws_access_key", "session_key"];
   if (forbidden.some(word => text.toLowerCase().includes(word))) return undefined;
@@ -232,6 +233,7 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
     : snapshot.phase === "awaiting-input" ? "Awaiting input" : snapshot.phase === "compacting" ? "Compacting context" : "Working";
   const tools = snapshot.tools;
   const active = tools.filter(t => t.state === "running");
+  const hiddenActiveCount = Math.max(0, snapshot.totalTools - snapshot.completedTools - snapshot.failedTools - snapshot.interruptedTools - active.length);
   const activeCount = Math.max(0, snapshot.totalTools - snapshot.completedTools - snapshot.failedTools - snapshot.interruptedTools);
   const jobs = active.filter(t => t.kind === "subagent" || t.kind === "background" || t.kind === "task");
   const finished = tools.filter(t => t.state !== "running");
@@ -248,7 +250,7 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
   if (snapshot.phase === "awaiting-input") add("<b>AWAITING INPUT</b>\n" + clean(snapshot.prompt ?? "User input", 120));
   if (!snapshot.settled && active.length && settings.tools !== "hidden") {
     const current = active.slice(-2);
-    add("<b>ACTIVE OPERATIONS</b>\n" + current.map(t => line(t)).join("\n"));
+    add("<b>ACTIVE OPERATIONS</b>\n" + current.map(t => line(t)).join("\n") + (active.length > current.length ? "\n+" + (active.length - current.length) + " other active" : "") + (hiddenActiveCount ? "\n+" + hiddenActiveCount + " untracked in visible history" : ""));
   } else {
     add("<b>CURRENT STATUS</b>\n" + phaseStatus);
   }
