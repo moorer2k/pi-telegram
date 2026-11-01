@@ -32,6 +32,7 @@ interface LiveTailState {
   editFailures: number;
   initialSendAttempted: boolean;
   lastActivityAt: number;
+  deliveryTargetKey?: string;
 }
 
 export interface LiveTailConsumer {
@@ -192,6 +193,14 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
       if (!state.projection.accept(event)) return;
       state.revision++;
       state.lastActivityAt = Date.now();
+      const target = event.target ?? (ctx.defaultScope.kind === "target" ? ctx.defaultScope.target : undefined);
+      const targetKey = target ? `${target.chatId}:${target.threadId ?? ""}` : undefined;
+      if (state.deliveryTargetKey && targetKey && state.deliveryTargetKey !== targetKey) {
+        // Never edit a message using an activity that moved to another chat/thread.
+        clearState(event.activityId);
+        return;
+      }
+      if (targetKey) state.deliveryTargetKey = targetKey;
       state.latest = ctx;
       if ((event.type === "reasoning-delta" && event.delta.length > 0) ||
           (event.type === "reasoning-end" && event.text.length > 0) ||
