@@ -60,14 +60,25 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
     activities.delete(id);
   }
 
+  function retireFailedActivity(id: string, state: LiveTailState): void {
+    if (activities.get(id) !== state) return;
+    state.failed = true;
+    state.dirty = false;
+    if (state.timer) { clearTimeout(state.timer); state.timer = undefined; }
+    if (state.finalDelivered) {
+      scheduleAutoDelete(id, state);
+    } else if (!state.cleanup) {
+      state.cleanupDeadline ??= Date.now() + RETAIN_SETTLED_MS;
+      state.cleanup = setTimeout(() => clearState(id), Math.max(0, state.cleanupDeadline - Date.now()));
+    }
+  }
+
   function schedule(id: string, delay: number): void {
     const state = activities.get(id);
     if (!state || closed || state.failed) return;
     if (state.cleanup) { clearTimeout(state.cleanup); state.cleanup = undefined; }
     if (state.settled && state.editRetryDeadline !== undefined && Date.now() >= state.editRetryDeadline) {
-      state.failed = true;
-      state.dirty = false;
-      if (state.finalDelivered) scheduleAutoDelete(id, state);
+      retireFailedActivity(id, state);
       return;
     }
     delay = Math.max(0, Number.isFinite(delay) ? delay : EDIT_INTERVAL_MS, state.retryNotBefore - Date.now());
@@ -83,13 +94,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
     const state = activities.get(id);
     if (!state || closed || state.pending || state.failed || state.deliveryPendingDeletion || !state.latest) return;
     if (state.settled && state.editRetryDeadline !== undefined && Date.now() >= state.editRetryDeadline) {
-        state.failed = true;
-        state.dirty = false;
-        if (state.finalDelivered) scheduleAutoDelete(id, state);
-        else if (!state.cleanup) {
-          state.cleanupDeadline ??= Date.now() + RETAIN_SETTLED_MS;
-          state.cleanup = setTimeout(() => clearState(id), Math.max(0, state.cleanupDeadline - Date.now()));
-        }
+      retireFailedActivity(id, state);
       return;
     }
     if (state.retryNotBefore > Date.now()) {
@@ -145,8 +150,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
         }
         state.editRetryDeadline ??= Date.now() + RETAIN_SETTLED_MS;
         if (state.settled && Date.now() >= state.editRetryDeadline) {
-          state.failed = true;
-          state.dirty = false;
+          retireFailedActivity(id, state);
           return;
         }
         state.dirty = true;
@@ -187,9 +191,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
       state.pending = false;
       if (closed || activities.get(id) !== state) return;
       if (state.settled && state.editRetryDeadline !== undefined && Date.now() >= state.editRetryDeadline && state.dirty) {
-        state.failed = true;
-        state.dirty = false;
-        if (state.timer) { clearTimeout(state.timer); state.timer = undefined; }
+        retireFailedActivity(id, state);
       }
       if (state.dirty && !closed && !state.failed && !state.timer) {
         schedule(id, EDIT_INTERVAL_MS);
