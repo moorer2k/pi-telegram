@@ -45,6 +45,8 @@ export interface LiveTailConsumer {
   onFinalDelivered(chatId: number, replyToMessageId: number | undefined): void;
 }
 
+let liveTailConsumerSequence = 0;
+
 export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSettings = () => ({})): LiveTailConsumer {
   const activities = new Map<string, LiveTailState>();
   let closed = false;
@@ -249,7 +251,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
   }
 
   const dispose = registerTelegramActivityHandler({
-    id: "@llblab/pi-telegram/live-tail",
+    id: `@llblab/pi-telegram/live-tail/${++liveTailConsumerSequence}`,
     handle(event: TelegramActivityEvent, ctx: TelegramActivityContext) {
       if (closed || event.source !== "telegram") return;
       if (getSettings().enabled === false) {
