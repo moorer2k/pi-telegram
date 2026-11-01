@@ -35,7 +35,6 @@ interface LiveTailState {
   deliveryTargetKey?: string;
   deliveredContext?: TelegramActivityContext;
   deliveryPendingDeletion: boolean;
-  deletionStartedAt?: number;
   deliveryGeneration: number;
 }
 
@@ -54,7 +53,6 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
     if (state.timer) clearTimeout(state.timer);
     if (state.cleanup) clearTimeout(state.cleanup);
     state.deliveryPendingDeletion = false;
-    state.deletionStartedAt = undefined;
     state.cleanupDeadline = undefined;
     state.deliveryGeneration++;
     activities.delete(id);
@@ -283,14 +281,20 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
       if (closed || activities.get(id) !== state) return;
       if (state.pending || state.timer || state.dirty) {
         state.cleanup = undefined;
-        // Keep the original deadline; the edit completion path re-arms deletion.
+        // A pending edit re-arms cleanup in finally. A scheduled retry retains its deadline.
+        if (!state.pending && state.timer) {
+          const deadline = state.cleanupDeadline ?? Date.now();
+          state.cleanup = setTimeout(() => {
+            state.cleanup = undefined;
+            if (activities.get(id) === state && !state.pending && !state.timer && !state.dirty) scheduleAutoDelete(id, state);
+          }, Math.max(EDIT_INTERVAL_MS, deadline - Date.now()));
+        }
         return;
       }
       if (state.handle && (state.deliveredContext ?? state.latest)) {
         const context = (state.deliveredContext ?? state.latest)!;
         const handle = state.handle;
         state.deliveryPendingDeletion = true;
-        state.deletionStartedAt = Date.now();
         // Preserve the state until deletion completes so a second cleanup cannot race it.
         void context.delete(handle).catch(() => {}).finally(() => {
           if (activities.get(id) === state) clearState(id);
