@@ -146,7 +146,10 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
       const deliveryContext = state.latest;
       const result = state.handle
         ? await deliveryContext.edit(state.handle, view)
-        : await deliveryContext.send(view, { replyToMessageId: state.replyToMessageId });
+        : await deliveryContext.send(view, {
+            replyToMessageId: state.replyToMessageId,
+            ...(deliveryContext.defaultScope.kind === "target" ? { scope: deliveryContext.defaultScope } : {}),
+          });
       if (closed || activities.get(id) !== state || state.deliveryGeneration !== generation) return;
       if (result.ok) {
         state.handle = result.value;
