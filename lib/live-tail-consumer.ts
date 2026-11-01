@@ -124,7 +124,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
         state.dirty = true;
         state.retryNotBefore = Date.now() + Math.max(EDIT_INTERVAL_MS, Math.min(120000, typeof result.retryAfterMs === "number" && Number.isFinite(result.retryAfterMs) ? result.retryAfterMs : 3000));
         schedule(id, state.retryNotBefore - Date.now());
-      } else if (state.handle && result.reason !== "runtime-unavailable" && result.reason !== "unauthorized" && state.editFailures < 3) {
+      } else if (state.handle && result.reason !== "runtime-unavailable" && result.reason !== "unauthorized" && result.reason !== "not-found" && state.editFailures < 3) {
         // Editing an acknowledged message is safe to retry: it cannot create duplicates.
         // Never apply this recovery path to an unacknowledged initial send.
         state.editFailures++;
@@ -142,6 +142,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
         state.dirty = false;
       }
     } catch {
+      if (closed || activities.get(id) !== state || state.deliveryGeneration !== generation) return;
       // An acknowledged edit is idempotent; an uncertain initial send is not.
       if (state.handle && state.editFailures < 3) {
         state.editFailures++;
