@@ -46,9 +46,12 @@ const MAX_ACTIVE_TOOLS = 64;
 function safePreview(value: unknown, max = 160): string | undefined {
   if (typeof value !== "string") return undefined;
   const text = value.replace(/\s+/g, " ").trim();
+  // Shell previews can include literal values and URLs containing credentials.
+  if (/(?:[a-z][a-z0-9+.-]*:\/\/[^\s/@]+:[^\s/@]+@|(?:^|\s)(?:-p|--password|--token|--secret)(?:=|\s+)|(?:^|\s)[A-Z][A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD)\s*=)/i.test(text)) return undefined;
   if (!text) return undefined;
   const forbidden = ["password", "passwd", "secret", "token", "api_key", "apikey", "authorization", "bearer ", "private_key", "credential", ".env", "--key", "--password", "aws_access_key", "session_key"];
   if (forbidden.some(word => text.toLowerCase().includes(word))) return undefined;
+  if (/\b(?:gh[pousr]_[A-Za-z0-9_]{12,}|sk-[A-Za-z0-9_-]{12,}|AKIA[0-9A-Z]{16})\b/.test(text)) return undefined;
   return text.slice(0, max);
 }
 
@@ -91,6 +94,7 @@ export function createLiveTailProjection(activityId: string) {
 
   function accept(event: TelegramActivityEvent): boolean {
     if (event.activityId !== activityId || event.sequence <= lastSequence || snapshot.settled) return false;
+    if (!Number.isFinite(event.timestamp) || event.timestamp < 0) return false;
     lastSequence = event.sequence;
     snapshot.updatedAt = event.timestamp;
     if (!snapshot.startedAt) snapshot.startedAt = event.timestamp;
@@ -111,7 +115,7 @@ export function createLiveTailProjection(activityId: string) {
         if (event.placement === "intermediate") snapshot.plan = event.text.slice(-MAX_PLAN);
         break;
       case "tool-start":
-        if (seenToolIds.has(event.toolCallId)) break;
+        if (!event.toolCallId || seenToolIds.has(event.toolCallId)) break;
         seenToolIds.add(event.toolCallId);
         snapshot.totalTools++;
         snapshot.tools.push({ id: event.toolCallId, name: event.toolName.slice(0, 70), kind: /subagent|delegate|spawn/i.test(event.toolName) ? "subagent" : /background|process|job/i.test(event.toolName) ? "background" : /todo|task/i.test(event.toolName) ? "task" : "tool", command: toolCommand(event.toolName, event.args), startedAt: event.timestamp, state: "running" });
@@ -126,7 +130,10 @@ export function createLiveTailProjection(activityId: string) {
         break;
       case "tool-update": {
         const tool = snapshot.tools.find(t => t.id === event.toolCallId);
-        if (tool && tool.state === "running") tool.update = toolSummary(event.update);
+        if (tool && tool.state === "running") {
+          const update = toolSummary(event.update);
+          if (update !== undefined) tool.update = update;
+        }
         break;
       }
       case "tool-end": {
@@ -165,7 +172,7 @@ export function createLiveTailProjection(activityId: string) {
           }
         }
         // Include running records evicted under extreme concurrency.
-        snapshot.interruptedTools = Math.max(0, snapshot.totalTools - snapshot.completedTools - snapshot.failedTools - snapshot.interruptedTools);
+        snapshot.interruptedTools = Math.max(0, snapshot.totalTools - snapshot.completedTools - snapshot.failedTools);
         seenToolIds.clear();
         finishedToolIds.clear();
         break;
@@ -204,17 +211,18 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
     return true;
   };
   const clean = (value: string, max: number) => escapeTelegramHtml(value.slice(0, max));
+  const safeDuration = (ms: number) => Number.isFinite(ms) && ms >= 0 ? (ms / 1000).toFixed(1) + "s" : "0.0s";
   const expandable = (value: string) => "<blockquote expandable>" + value + "</blockquote>";
   const tools = snapshot.tools;
   const active = tools.filter(t => t.state === "running");
-  const activeCount = Math.max(0, snapshot.totalTools - snapshot.completedTools - snapshot.failedTools);
+  const activeCount = Math.max(0, snapshot.totalTools - snapshot.completedTools - snapshot.failedTools - snapshot.interruptedTools);
   const jobs = active.filter(t => t.kind === "subagent" || t.kind === "background" || t.kind === "task");
   const finished = tools.filter(t => t.state !== "running");
   const line = (tool: LiveTailTool, compact = false) => {
     const status = tool.state === "running" ? "[RUN]" : tool.state === "error" ? "[ERR]" : tool.state === "interrupted" ? "[STOP]" : "[OK]";
     const command = tool.command ? " " + clean(tool.command, compact ? 90 : 160) : "";
     const update = !compact && tool.update ? "\n" + clean(tool.update, 90) : "";
-    const duration = tool.elapsedMs === undefined ? "" : " (" + (tool.elapsedMs / 1000).toFixed(1) + "s)";
+    const duration = tool.elapsedMs === undefined ? "" : " (" + safeDuration(tool.elapsedMs) + ")";
     const result = !compact && tool.state === "error" && tool.result ? "\n" + clean(tool.result, 90) : "";
     return status + " <code>" + clean(tool.name, 50) + command + "</code>" + duration + update + result;
   };
@@ -227,7 +235,7 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
   } else {
     add("<b>CURRENT STATUS</b>\n" + (snapshot.settled ? "Completed" : "Working"));
   }
-  if (detail !== "minimal" && settings.tools !== "hidden" && jobs.length > 2) add("<b>ONGOING TASKS</b>\n" + jobs.slice(0, 4).map(t => clean(t.name, 50)).join("\n"));
+  if (detail !== "minimal" && settings.tools !== "hidden" && jobs.length > 2) add("<b>ONGOING TASKS</b>\n" + jobs.slice(-4).map(t => clean(t.name, 50)).join("\n"));
   if (detail !== "minimal" && snapshot.plan) {
     add("<b>CURRENT TASK</b>\n" + clean(snapshot.plan.slice(-200), 200));
   }
@@ -235,7 +243,7 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
     const recent = finished.slice(-(detail === "detailed" ? 5 : 2));
     add("<b>RECENT OPERATIONS</b>\n" + recent.map(t => line(t, true)).join("\n"));
     if (detail === "detailed" && finished.length > 2) {
-      const history = finished.slice(-12, -2);
+      const history = finished.slice(-17, -5);
       if (history.length) add("<i>Earlier operations (" + history.length + ")</i>\n" + expandable(history.map(t => line(t, true)).join("\n")));
     }
   }
