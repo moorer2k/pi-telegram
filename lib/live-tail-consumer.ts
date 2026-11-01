@@ -82,7 +82,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
       } else if (result.reason === "rate-limited") {
         if (result.partial) state.handle = result.partial;
         state.dirty = true;
-        state.retryNotBefore = Date.now() + Math.max(EDIT_INTERVAL_MS, Math.min(120000, Number.isFinite(result.retryAfterMs) ? (result.retryAfterMs ?? 3000) : 3000));
+        state.retryNotBefore = Date.now() + Math.max(EDIT_INTERVAL_MS, Math.min(120000, typeof result.retryAfterMs === "number" && Number.isFinite(result.retryAfterMs) ? result.retryAfterMs : 3000));
         schedule(id, state.retryNotBefore - Date.now());
       } else {
         // Preserve any acknowledged message handle for final cleanup.
