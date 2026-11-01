@@ -36,6 +36,7 @@ interface LiveTailState {
   deliveredContext?: TelegramActivityContext;
   deliveryPendingDeletion: boolean;
   deliveryGeneration: number;
+  editRetryDeadline?: number;
 }
 
 export interface LiveTailConsumer {
@@ -115,6 +116,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
         state.lastText = text;
         state.retryNotBefore = 0;
         state.editFailures = 0;
+        state.editRetryDeadline = undefined;
         if (state.revision !== sentRevision) state.dirty = true;
         // A newer event may have arrived while this delivery was in flight.
         // Preserve dirty=true in that case so the latest projection is flushed.
@@ -122,6 +124,12 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
         if (result.partial) {
           state.handle = result.partial;
           state.deliveredContext = deliveryContext;
+        }
+        state.editRetryDeadline ??= Date.now() + RETAIN_SETTLED_MS;
+        if (state.settled && Date.now() >= state.editRetryDeadline) {
+          state.failed = true;
+          state.dirty = false;
+          return;
         }
         state.dirty = true;
         state.retryNotBefore = Date.now() + Math.max(EDIT_INTERVAL_MS, Math.min(120000, typeof result.retryAfterMs === "number" && Number.isFinite(result.retryAfterMs) ? result.retryAfterMs : 3000));
