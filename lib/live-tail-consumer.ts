@@ -60,6 +60,10 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
   async function flush(id: string): Promise<void> {
     const state = activities.get(id);
     if (!state || closed || state.pending || state.failed || !state.latest) return;
+    if (state.retryNotBefore > Date.now()) {
+      schedule(id, state.retryNotBefore - Date.now());
+      return;
+    }
     if (getSettings().enabled === false) {
       // A disabled consumer must not retain pending timers or activity state.
       clearState(id);
