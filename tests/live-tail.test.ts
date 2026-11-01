@@ -348,3 +348,16 @@ test("authorization headers are not displayed in command previews", () => {
   const output = renderLiveTail(tail.getSnapshot(), {detail:"detailed"});
   assert.doesNotMatch(output, /abc123/);
 });
+
+test("long opaque credential-like command values are not rendered", () => {
+  const tail = createLiveTailProjection("opaque");
+  const opaque = "A".repeat(80);
+  tail.accept({activityId:"opaque",source:"telegram",timestamp:1,sequence:1,type:"tool-start",toolCallId:"a",toolName:"terminal",args:{command:"echo "+opaque}});
+  assert.doesNotMatch(renderLiveTail(tail.getSnapshot(), {detail:"detailed"}), new RegExp(opaque));
+});
+
+test("normal short commands remain visible after opaque-value filtering", () => {
+  const tail = createLiveTailProjection("short-command");
+  tail.accept({activityId:"short-command",source:"telegram",timestamp:1,sequence:1,type:"tool-start",toolCallId:"a",toolName:"terminal",args:{command:"git status --short"}});
+  assert.match(renderLiveTail(tail.getSnapshot()), /git status --short/);
+});
