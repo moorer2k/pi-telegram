@@ -54,12 +54,13 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
     state.timer = setTimeout(() => {
       state.timer = undefined;
       void flush(id);
-    }, delay);
+    }, Math.max(0, delay));
   }
 
   async function flush(id: string): Promise<void> {
     const state = activities.get(id);
     if (!state || closed || state.pending || state.failed || !state.latest) return;
+    if (getSettings().enabled === false) return;
     state.pending = true;
     state.lastFlushStartedAt = Date.now();
     state.dirty = false;
@@ -68,6 +69,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
       const text = renderLiveTail(state.projection.getSnapshot(), settings);
       // Do not emit a status-only message for turns without visible activity.
       if (!state.hasContent || text === state.lastText) return;
+      if (!text.trim()) return;
       const view = { text, parseMode: "html" as const };
       const result = state.handle
         ? await state.latest.edit(state.handle, view)
@@ -76,10 +78,11 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
       if (result.ok) {
         state.handle = result.value;
         state.lastText = text;
+        state.retryNotBefore = 0;
       } else if (result.reason === "rate-limited") {
         if (result.partial) state.handle = result.partial;
         state.dirty = true;
-        state.retryNotBefore = Date.now() + Math.max(EDIT_INTERVAL_MS, result.retryAfterMs ?? 3000);
+        state.retryNotBefore = Date.now() + Math.max(EDIT_INTERVAL_MS, Math.min(120000, Number.isFinite(result.retryAfterMs) ? (result.retryAfterMs ?? 3000) : 3000));
         schedule(id, state.retryNotBefore - Date.now());
       } else {
         // Preserve any acknowledged message handle for final cleanup.
@@ -142,7 +145,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
       } else {
         // Throttle rather than debounce: continuous token deltas must not postpone updates forever.
         if (!state.timer || state.settled) {
-          const interval = (getSettings().interval ?? 2) * 1000;
+          const interval = Math.max(1, Math.min(3, getSettings().interval ?? 2)) * 1000;
           const elapsed = Date.now() - state.lastFlushStartedAt;
           schedule(event.activityId, state.settled ? 0 : Math.max(0, interval - elapsed));
         }
