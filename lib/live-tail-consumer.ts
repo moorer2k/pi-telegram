@@ -181,6 +181,11 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
       if (state.dirty && !closed && !state.failed && !state.timer) {
         schedule(id, EDIT_INTERVAL_MS);
       }
+      if (state.settled && state.editRetryDeadline !== undefined && Date.now() >= state.editRetryDeadline && state.dirty) {
+        state.failed = true;
+        state.dirty = false;
+        if (state.timer) { clearTimeout(state.timer); state.timer = undefined; }
+      }
       if (state.settled && state.finalDelivered) {
         if (state.failed) {
           state.dirty = false;
