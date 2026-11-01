@@ -281,14 +281,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
       if (closed || activities.get(id) !== state) return;
       if (state.pending || state.timer || state.dirty) {
         state.cleanup = undefined;
-        // A pending edit re-arms cleanup in finally. A scheduled retry retains its deadline.
-        if (!state.pending && state.timer) {
-          const deadline = state.cleanupDeadline ?? Date.now();
-          state.cleanup = setTimeout(() => {
-            state.cleanup = undefined;
-            if (activities.get(id) === state && !state.pending && !state.timer && !state.dirty) scheduleAutoDelete(id, state);
-          }, Math.max(EDIT_INTERVAL_MS, deadline - Date.now()));
-        }
+        // The active delivery or scheduled flush will re-arm cleanup.
         return;
       }
       if (state.handle && (state.deliveredContext ?? state.latest)) {
