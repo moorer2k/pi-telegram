@@ -121,3 +121,50 @@ test("live tail does not restart an evicted operation with the same ID", () => {
   tail.accept({activityId:"evicted-dedupe",source:"telegram",timestamp:100,sequence:71,type:"tool-start",toolCallId:"0",toolName:"terminal",args:{}});
   assert.equal(tail.getSnapshot().totalTools, 70);
 });
+
+test("interrupted count is correct after a mix of completed and failed operations", () => {
+  const tail = createLiveTailProjection("mixed");
+  for (let i = 0; i < 3; i++) tail.accept({activityId:"mixed",source:"telegram",timestamp:10+i,sequence:i+1,type:"tool-start",toolCallId:String(i),toolName:"terminal",args:{}});
+  tail.accept({activityId:"mixed",source:"telegram",timestamp:20,sequence:4,type:"tool-end",toolCallId:"0",toolName:"terminal",result:"ok",isError:false});
+  tail.accept({activityId:"mixed",source:"telegram",timestamp:21,sequence:5,type:"tool-end",toolCallId:"1",toolName:"terminal",result:"failed",isError:true});
+  tail.accept({activityId:"mixed",source:"telegram",timestamp:22,sequence:6,type:"agent-settled"});
+  const state = tail.getSnapshot();
+  assert.equal(state.completedTools, 1);
+  assert.equal(state.failedTools, 1);
+  assert.equal(state.interruptedTools, 1);
+  assert.match(renderLiveTail(state), /0 active/);
+  assert.match(renderLiveTail(state), /1 interrupted/);
+});
+
+test("credential-bearing URLs and command options are not displayed", () => {
+  const tail = createLiveTailProjection("secrets");
+  const cmds = ["curl https://alice:password@example.com", "tool --token abc123", "export AWS_SECRET_ACCESS_KEY=abc"];
+  cmds.forEach((command, i) => tail.accept({activityId:"secrets",source:"telegram",timestamp:i+1,sequence:i+1,type:"tool-start",toolCallId:String(i),toolName:"terminal",args:{command}}));
+  const output = renderLiveTail(tail.getSnapshot(), {detail:"detailed"});
+  assert.doesNotMatch(output, /alice:password|abc123|AWS_SECRET_ACCESS_KEY=abc/);
+});
+
+test("tool updates preserve the last meaningful preview", () => {
+  const tail = createLiveTailProjection("updates");
+  tail.accept({activityId:"updates",source:"telegram",timestamp:1,sequence:1,type:"tool-start",toolCallId:"a",toolName:"terminal",args:{}});
+  tail.accept({activityId:"updates",source:"telegram",timestamp:2,sequence:2,type:"tool-update",toolCallId:"a",toolName:"terminal",update:"step one"});
+  tail.accept({activityId:"updates",source:"telegram",timestamp:3,sequence:3,type:"tool-update",toolCallId:"a",toolName:"terminal",update:{unknown:1}});
+  assert.equal(tail.getSnapshot().tools[0]?.update, "step one");
+});
+
+test("detailed history does not repeat recent operations", () => {
+  const tail = createLiveTailProjection("history");
+  for (let i = 0; i < 12; i++) {
+    tail.accept({activityId:"history",source:"telegram",timestamp:i*2+1,sequence:i*2+1,type:"tool-start",toolCallId:String(i),toolName:"operation_"+i,args:{}});
+    tail.accept({activityId:"history",source:"telegram",timestamp:i*2+2,sequence:i*2+2,type:"tool-end",toolCallId:String(i),toolName:"operation_"+i,result:"ok",isError:false});
+  }
+  const output = renderLiveTail(tail.getSnapshot(), {detail:"detailed",tools:"recent",reasoning:"hidden"});
+  assert.equal((output.match(/operation_11/g) ?? []).length, 1);
+  assert.equal((output.match(/operation_10/g) ?? []).length, 1);
+});
+
+test("invalid timestamps are ignored", () => {
+  const tail = createLiveTailProjection("timestamp");
+  assert.equal(tail.accept({activityId:"timestamp",source:"telegram",timestamp:NaN,sequence:1,type:"agent-start"}),false);
+  assert.equal(tail.accept({activityId:"timestamp",source:"telegram",timestamp:10,sequence:1,type:"agent-start"}),true);
+});
