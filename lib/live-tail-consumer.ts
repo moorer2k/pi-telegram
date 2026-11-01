@@ -49,7 +49,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
   function schedule(id: string, delay: number): void {
     const state = activities.get(id);
     if (!state || closed || state.failed) return;
-    delay = Math.max(delay, state.retryNotBefore - Date.now());
+    delay = Math.max(0, Number.isFinite(delay) ? delay : EDIT_INTERVAL_MS, state.retryNotBefore - Date.now());
     if (state.timer) clearTimeout(state.timer);
     state.timer = setTimeout(() => {
       state.timer = undefined;
@@ -115,7 +115,11 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
   const dispose = registerTelegramActivityHandler({
     id: "@llblab/pi-telegram/live-tail",
     handle(event: TelegramActivityEvent, ctx: TelegramActivityContext) {
-      if (closed || event.source !== "telegram" || getSettings().enabled === false) return;
+      if (closed || event.source !== "telegram") return;
+      if (getSettings().enabled === false) {
+        clearState(event.activityId);
+        return;
+      }
       let state = activities.get(event.activityId);
       if (!state) {
         if (event.type !== "agent-start") return;
@@ -155,7 +159,8 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
       } else {
         // Throttle rather than debounce: continuous token deltas must not postpone updates forever.
         if (!state.timer || state.settled) {
-          const interval = Math.max(1, Math.min(3, getSettings().interval ?? 2)) * 1000;
+          const configuredInterval = getSettings().interval;
+          const interval = Math.max(1, Math.min(3, typeof configuredInterval === "number" && Number.isFinite(configuredInterval) ? configuredInterval : 2)) * 1000;
           const elapsed = Date.now() - state.lastFlushStartedAt;
           schedule(event.activityId, state.settled ? 0 : Math.max(0, interval - elapsed));
         }
