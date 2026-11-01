@@ -30,7 +30,6 @@ interface LiveTailState {
   revision: number;
   cleanupDeadline?: number;
   editFailures: number;
-  lastEditAttemptRevision: number;
 }
 
 export interface LiveTailConsumer {
@@ -89,7 +88,6 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
         return;
       }
       const view = { text, parseMode: "html" as const };
-      state.lastEditAttemptRevision = sentRevision;
       const result = state.handle
         ? await state.latest.edit(state.handle, view)
         : await state.latest.send(view, { replyToMessageId: state.replyToMessageId });
@@ -102,7 +100,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
         if (state.revision !== sentRevision) state.dirty = true;
         // A newer event may have arrived while this delivery was in flight.
         // Preserve dirty=true in that case so the latest projection is flushed.
-      } else if (result.reason === "rate-limited") {
+      } else if (result.reason === "rate-limited" && (state.handle || result.partial)) {
         if (result.partial) state.handle = result.partial;
         state.dirty = true;
         state.retryNotBefore = Date.now() + Math.max(EDIT_INTERVAL_MS, Math.min(120000, typeof result.retryAfterMs === "number" && Number.isFinite(result.retryAfterMs) ? result.retryAfterMs : 3000));
@@ -173,7 +171,6 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
           replyToMessageId: event.replyToMessageId,
           revision: 0,
           editFailures: 0,
-          lastEditAttemptRevision: -1,
         };
         activities.set(event.activityId, state);
       }
@@ -236,8 +233,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
       if (closed || activities.get(id) !== state) return;
       if (state.pending || state.timer || state.dirty) {
         state.cleanup = undefined;
-        // Wait for the active edit to finish; its finally block re-arms deletion.
-        if (!state.pending && !state.timer && !state.dirty) scheduleAutoDelete(id, state);
+        // The edit completion path re-arms deletion after pending work drains.
         return;
       }
       if (state.handle && state.latest) void state.latest.delete(state.handle).catch(() => {});
