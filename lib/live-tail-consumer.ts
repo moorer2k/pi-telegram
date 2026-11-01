@@ -97,9 +97,11 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
         return;
       }
       if (!state.handle) state.initialSendAttempted = true;
+      // Capture the authorized context before awaiting transport.
+      const deliveryContext = state.latest;
       const result = state.handle
-        ? await state.latest.edit(state.handle, view)
-        : await state.latest.send(view, { replyToMessageId: state.replyToMessageId });
+        ? await deliveryContext.edit(state.handle, view)
+        : await deliveryContext.send(view, { replyToMessageId: state.replyToMessageId });
       if (closed || activities.get(id) !== state) return;
       if (result.ok) {
         state.handle = result.value;
