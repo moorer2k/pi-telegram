@@ -310,7 +310,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
     if (closed) return;
     const candidates = [...activities.entries()].filter(([, state]) => {
       const target = state.handle?.target ?? (state.latest?.defaultScope.kind === "target" ? state.latest.defaultScope.target : undefined);
-      return target?.chatId === chatId && state.replyToMessageId === replyToMessageId && !state.finalDelivered;
+      return target?.chatId === chatId && state.replyToMessageId === replyToMessageId && !state.finalDelivered && !state.deliveryPendingDeletion;
     });
     // A chat/reply pair can identify multiple concurrent activities. Never finalize
     // another turn's progress message when correlation is ambiguous.
