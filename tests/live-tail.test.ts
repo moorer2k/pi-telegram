@@ -203,3 +203,28 @@ test("status distinguishes failures from interrupted work", () => {
   tail.accept({activityId:"failed-status",source:"telegram",timestamp:3,sequence:3,type:"agent-settled"});
   assert.match(renderLiveTail(tail.getSnapshot()), /Finished with errors/);
 });
+
+test("settled Live Tail does not render active-operation sections", () => {
+  const tail = createLiveTailProjection("settled-ui");
+  tail.accept({activityId:"settled-ui",source:"telegram",timestamp:1,sequence:1,type:"tool-start",toolCallId:"a",toolName:"subagent",args:{task:"work"}});
+  tail.accept({activityId:"settled-ui",source:"telegram",timestamp:2,sequence:2,type:"agent-settled"});
+  const output = renderLiveTail(tail.getSnapshot(), {detail:"detailed"});
+  assert.doesNotMatch(output, /<b>ACTIVE OPERATIONS<\/b>/);
+  assert.match(output, /Interrupted/);
+});
+
+test("hidden tools also hide ongoing delegated tasks", () => {
+  const tail = createLiveTailProjection("hidden-jobs");
+  for (let i = 0; i < 4; i++) tail.accept({activityId:"hidden-jobs",source:"telegram",timestamp:i+1,sequence:i+1,type:"tool-start",toolCallId:String(i),toolName:"subagent",args:{task:"hidden work"}});
+  const output = renderLiveTail(tail.getSnapshot(), {detail:"detailed",tools:"hidden",reasoning:"hidden"});
+  assert.doesNotMatch(output, /ONGOING TASKS|ACTIVE OPERATIONS|subagent/);
+});
+
+test("finished operation IDs cannot be completed twice", () => {
+  const tail = createLiveTailProjection("duplicate-failure");
+  tail.accept({activityId:"duplicate-failure",source:"telegram",timestamp:1,sequence:1,type:"tool-start",toolCallId:"a",toolName:"terminal",args:{}});
+  tail.accept({activityId:"duplicate-failure",source:"telegram",timestamp:2,sequence:2,type:"tool-end",toolCallId:"a",toolName:"terminal",result:"failed",isError:true});
+  tail.accept({activityId:"duplicate-failure",source:"telegram",timestamp:3,sequence:3,type:"tool-end",toolCallId:"a",toolName:"terminal",result:"success",isError:false});
+  assert.equal(tail.getSnapshot().failedTools, 1);
+  assert.equal(tail.getSnapshot().completedTools, 0);
+});
