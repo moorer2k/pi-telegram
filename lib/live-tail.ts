@@ -92,6 +92,7 @@ export function createLiveTailProjection(activityId: string) {
   const seenToolIds = new Set<string>();
   const finishedToolIds = new Set<string>();
   let firstTimestampSeen = false;
+  const safeText = (value: string, max: number) => safePreview(value, max) ?? "";
 
   function accept(event: TelegramActivityEvent): boolean {
     if (event.activityId !== activityId || event.sequence <= lastSequence || snapshot.settled) return false;
@@ -109,23 +110,23 @@ export function createLiveTailProjection(activityId: string) {
           snapshot.reasoning = "";
         }
         reasoningIndex = event.contentIndex;
-        snapshot.reasoning = appendBounded(snapshot.reasoning, event.delta, MAX_REASONING);
+        snapshot.reasoning = appendBounded(snapshot.reasoning, safeText(event.delta, MAX_REASONING), MAX_REASONING);
         break;
       case "reasoning-end":
         if (reasoningIndex !== undefined && reasoningIndex !== event.contentIndex && snapshot.reasoning) {
           snapshot.earlierReasoning = appendBounded(snapshot.earlierReasoning, snapshot.reasoning + "\n", MAX_EARLIER);
         }
         reasoningIndex = event.contentIndex;
-        snapshot.reasoning = event.text.slice(-MAX_REASONING);
+        snapshot.reasoning = safeText(event.text.slice(-MAX_REASONING), MAX_REASONING);
         break;
       case "assistant-segment":
-        if (event.placement === "intermediate") snapshot.plan = event.text.slice(-MAX_PLAN);
+        if (event.placement === "intermediate") snapshot.plan = safeText(event.text.slice(-MAX_PLAN), MAX_PLAN);
         break;
       case "tool-start":
         if (!event.toolCallId || seenToolIds.has(event.toolCallId)) break;
         seenToolIds.add(event.toolCallId);
         snapshot.totalTools++;
-        snapshot.tools.push({ id: event.toolCallId, name: event.toolName.slice(0, 70), kind: /subagent|delegate|spawn/i.test(event.toolName) ? "subagent" : /background|process|job/i.test(event.toolName) ? "background" : /todo|task/i.test(event.toolName) ? "task" : "tool", command: toolCommand(event.toolName, event.args), startedAt: event.timestamp, state: "running" });
+        snapshot.tools.push({ id: event.toolCallId, name: safeText(event.toolName, 70) || "tool", kind: /subagent|delegate|spawn/i.test(event.toolName) ? "subagent" : /background|process|job/i.test(event.toolName) ? "background" : /todo|task/i.test(event.toolName) ? "task" : "tool", command: toolCommand(event.toolName, event.args), startedAt: event.timestamp, state: "running" });
         if (snapshot.tools.length > MAX_TOOLS) {
           const finishedIndex = snapshot.tools.findIndex(t => t.state !== "running");
           if (finishedIndex >= 0) snapshot.tools.splice(finishedIndex, 1);
@@ -165,7 +166,7 @@ export function createLiveTailProjection(activityId: string) {
         break;
       case "ui-prompt-start":
         snapshot.phase = "awaiting-input";
-        snapshot.prompt = event.title?.slice(0, 120) ?? event.kind;
+        snapshot.prompt = event.title ? safeText(event.title, 120) || "Input requested" : event.kind;
         break;
       case "ui-prompt-end":
         if (snapshot.phase === "awaiting-input") {
