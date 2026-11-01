@@ -153,7 +153,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
         state.retryNotBefore = Date.now() + Math.max(EDIT_INTERVAL_MS, Math.min(120000, typeof result.retryAfterMs === "number" && Number.isFinite(result.retryAfterMs) ? result.retryAfterMs : 3000));
         if (state.settled) state.retryNotBefore = Math.min(state.retryNotBefore, state.editRetryDeadline);
         schedule(id, state.retryNotBefore - Date.now());
-      } else if (state.handle && result.reason !== "runtime-unavailable" && result.reason !== "unauthorized" && result.reason !== "not-found" && state.editFailures < 3) {
+      } else if (state.handle && (result.reason === "transport-retryable" || result.reason === "transport-failed" || result.reason === "commit-unknown") && state.editFailures < 3) {
         // Editing an acknowledged message is safe to retry: it cannot create duplicates.
         // Never apply this recovery path to an unacknowledged initial send.
         state.editFailures++;
