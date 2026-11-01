@@ -292,3 +292,32 @@ test("activity elapsed time never rewinds on late timestamped events", () => {
   assert.equal(tail.getSnapshot().updatedAt, 9000);
   assert.match(renderLiveTail(tail.getSnapshot()), /8s/);
 });
+
+test("reasoning and intermediate task text suppress credential-bearing content", () => {
+  const tail = createLiveTailProjection("reasoning-redaction");
+  tail.accept({activityId:"reasoning-redaction",source:"telegram",timestamp:1,sequence:1,type:"reasoning-delta",contentIndex:0,delta:"Bearer sk-example-value"});
+  tail.accept({activityId:"reasoning-redaction",source:"telegram",timestamp:2,sequence:2,type:"assistant-segment",contentIndex:1,text:"password=example",placement:"intermediate"});
+  const output = renderLiveTail(tail.getSnapshot(), {detail:"detailed",reasoning:"expanded"});
+  assert.doesNotMatch(output, /sk-example-value|password=example/);
+});
+
+test("interactive prompt titles are sanitized before HTML output", () => {
+  const tail = createLiveTailProjection("prompt-redaction");
+  tail.accept({activityId:"prompt-redaction",source:"telegram",timestamp:1,sequence:1,type:"ui-prompt-start",kind:"input",title:"Enter API_KEY=abc123"});
+  const output = renderLiveTail(tail.getSnapshot());
+  assert.doesNotMatch(output, /API_KEY=abc123/);
+  assert.match(output, /Input requested/);
+});
+
+test("tool labels containing credentials are suppressed", () => {
+  const tail = createLiveTailProjection("tool-name-redaction");
+  tail.accept({activityId:"tool-name-redaction",source:"telegram",timestamp:1,sequence:1,type:"tool-start",toolCallId:"a",toolName:"terminal --token abc123",args:{}});
+  const output = renderLiveTail(tail.getSnapshot());
+  assert.doesNotMatch(output, /abc123/);
+});
+
+test("normal reasoning remains visible after sanitization", () => {
+  const tail = createLiveTailProjection("normal-reasoning");
+  tail.accept({activityId:"normal-reasoning",source:"telegram",timestamp:1,sequence:1,type:"reasoning-delta",contentIndex:0,delta:"Checking the build output"});
+  assert.match(renderLiveTail(tail.getSnapshot(), {reasoning:"expanded"}), /Checking the build output/);
+});
