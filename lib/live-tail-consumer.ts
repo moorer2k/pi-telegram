@@ -1,6 +1,7 @@
 /**
  * Optional live-tail consumer. One bounded, editable Telegram message per activity.
  * Delivery remains authorized and generation-fenced by the Activity API.
+ * Zones: telegram, pi agent
  */
 import { registerTelegramActivityHandler, type TelegramActivityContext, type TelegramActivityEvent } from "./activity.ts";
 import { createLiveTailProjection, renderLiveTail } from "./live-tail.ts";
@@ -27,12 +28,25 @@ interface LiveTailState {
   retryNotBefore: number;
   hasContent: boolean;
   finalDelivered: boolean;
+  revision: number;
+  cleanupDeadline?: number;
+  editFailures: number;
+  initialSendAttempted: boolean;
+  lastActivityAt: number;
+  deliveryTargetKey?: string;
+  deliveredContext?: TelegramActivityContext;
+  deliveryPendingDeletion: boolean;
+  deliveryGeneration: number;
+  editRetryDeadline?: number;
+  missingMessageRecoveries: number;
 }
 
 export interface LiveTailConsumer {
   dispose(): void;
   onFinalDelivered(chatId: number, replyToMessageId: number | undefined): void;
 }
+
+let liveTailConsumerSequence = 0;
 
 export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSettings = () => ({})): LiveTailConsumer {
   const activities = new Map<string, LiveTailState>();
@@ -43,95 +57,283 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
     if (!state) return;
     if (state.timer) clearTimeout(state.timer);
     if (state.cleanup) clearTimeout(state.cleanup);
+    state.editRetryDeadline = undefined;
+    state.deliveryPendingDeletion = false;
+    state.cleanupDeadline = undefined;
+    state.deliveryGeneration++;
     activities.delete(id);
+  }
+
+  function retireFailedActivity(id: string, state: LiveTailState): void {
+    if (activities.get(id) !== state) return;
+    state.failed = true;
+    state.dirty = false;
+    if (state.timer) { clearTimeout(state.timer); state.timer = undefined; }
+    if (state.cleanup && state.finalDelivered && state.settled && !state.deliveryPendingDeletion) {
+      clearTimeout(state.cleanup);
+      state.cleanup = undefined;
+      state.cleanupDeadline = undefined;
+    }
+    if (state.finalDelivered && state.settled && !state.pending && !state.deliveryPendingDeletion) {
+      scheduleAutoDelete(id, state);
+    } else if (!state.cleanup) {
+      state.cleanupDeadline ??= Date.now() + RETAIN_SETTLED_MS;
+      state.cleanup = setTimeout(() => {
+        if (activities.get(id) !== state) return;
+        if (state.pending || state.deliveryPendingDeletion) {
+          state.cleanup = undefined;
+          state.cleanupDeadline = Date.now() + RETAIN_SETTLED_MS;
+          retireFailedActivity(id, state);
+          return;
+        }
+        clearState(id);
+      }, Math.max(0, state.cleanupDeadline - Date.now()));
+    }
   }
 
   function schedule(id: string, delay: number): void {
     const state = activities.get(id);
     if (!state || closed || state.failed) return;
-    delay = Math.max(delay, state.retryNotBefore - Date.now());
+    if (state.cleanup) { clearTimeout(state.cleanup); state.cleanup = undefined; }
+    if (state.settled && state.editRetryDeadline !== undefined && Date.now() >= state.editRetryDeadline) {
+      retireFailedActivity(id, state);
+      return;
+    }
+    delay = Math.max(0, Number.isFinite(delay) ? delay : EDIT_INTERVAL_MS, state.retryNotBefore - Date.now());
+    if (state.settled && state.editRetryDeadline !== undefined) delay = Math.min(delay, Math.max(0, state.editRetryDeadline - Date.now()));
     if (state.timer) clearTimeout(state.timer);
     state.timer = setTimeout(() => {
       state.timer = undefined;
       void flush(id);
-    }, delay);
+    }, Math.max(0, delay));
   }
 
   async function flush(id: string): Promise<void> {
     const state = activities.get(id);
-    if (!state || closed || state.pending || state.failed || !state.latest) return;
+    if (!state || closed || state.pending || state.failed || state.deliveryPendingDeletion || !state.latest) return;
+    if (state.settled && state.editRetryDeadline !== undefined && Date.now() >= state.editRetryDeadline) {
+      retireFailedActivity(id, state);
+      return;
+    }
+    if (state.retryNotBefore > Date.now()) {
+      schedule(id, state.retryNotBefore - Date.now());
+      return;
+    }
+    if (getSettings().enabled === false) {
+      // A disabled consumer must not retain pending timers or activity state.
+      clearState(id);
+      return;
+    }
     state.pending = true;
+    const generation = state.deliveryGeneration;
     state.lastFlushStartedAt = Date.now();
     state.dirty = false;
+    const sentRevision = state.revision;
     try {
       const settings = getSettings();
       const text = renderLiveTail(state.projection.getSnapshot(), settings);
       // Do not emit a status-only message for turns without visible activity.
-      if (!state.hasContent || text === state.lastText) return;
+      if (!state.hasContent || text === state.lastText || !text.trim()) {
+        // A no-op flush may still have been superseded by a newer event.
+        state.dirty = state.revision !== sentRevision;
+        return;
+      }
       const view = { text, parseMode: "html" as const };
+      if (!state.handle && state.initialSendAttempted) {
+        state.failed = true;
+        state.dirty = false;
+        return;
+      }
+      if (!state.handle) state.initialSendAttempted = true;
+      // Capture the authorized context before awaiting transport.
+      const deliveryContext = state.latest;
       const result = state.handle
-        ? await state.latest.edit(state.handle, view)
-        : await state.latest.send(view, { replyToMessageId: state.replyToMessageId });
-      if (closed || activities.get(id) !== state) return;
+        ? await deliveryContext.edit(state.handle, view)
+        : await deliveryContext.send(view, {
+            replyToMessageId: state.replyToMessageId,
+            ...(deliveryContext.defaultScope.kind === "target" ? { scope: deliveryContext.defaultScope } : {}),
+          });
+      if (closed || activities.get(id) !== state || state.deliveryGeneration !== generation) return;
       if (result.ok) {
         state.handle = result.value;
+        state.deliveredContext = deliveryContext;
         state.lastText = text;
-      } else if (result.reason === "rate-limited") {
+        state.retryNotBefore = 0;
+        state.editFailures = 0;
+        state.editRetryDeadline = undefined;
+        if (state.revision !== sentRevision) state.dirty = true;
+        // A newer event may have arrived while this delivery was in flight.
+        // Preserve dirty=true in that case so the latest projection is flushed.
+      } else if (result.reason === "rate-limited" && (state.handle || result.partial)) {
+        if (result.partial) {
+          state.handle = result.partial;
+          state.deliveredContext = deliveryContext;
+        }
+        state.editRetryDeadline ??= Date.now() + RETAIN_SETTLED_MS;
+        if (state.settled && Date.now() >= state.editRetryDeadline) {
+          retireFailedActivity(id, state);
+          return;
+        }
         state.dirty = true;
-        state.retryNotBefore = Date.now() + Math.max(EDIT_INTERVAL_MS, result.retryAfterMs ?? 3000);
+        state.retryNotBefore = Date.now() + Math.max(EDIT_INTERVAL_MS, Math.min(120000, typeof result.retryAfterMs === "number" && Number.isFinite(result.retryAfterMs) ? result.retryAfterMs : 3000));
+        if (state.settled) state.retryNotBefore = Math.min(state.retryNotBefore, state.editRetryDeadline);
+        schedule(id, state.retryNotBefore - Date.now());
+      } else if (state.handle && result.reason === "message-unavailable" && state.missingMessageRecoveries < 1 && state.deliveryTargetKey && deliveryContext.defaultScope.kind === "target" && state.deliveryTargetKey === `${deliveryContext.defaultScope.target.chatId}:${deliveryContext.defaultScope.target.threadId ?? ""}`) {
+        // Telegram confirms the old message is gone. Recreate once at the same
+        // authorized destination; never recreate after an ambiguous send.
+        state.missingMessageRecoveries++;
+        state.handle = undefined;
+        state.deliveredContext = undefined;
+        state.lastText = undefined;
+        state.initialSendAttempted = false;
+        state.editFailures = 0;
+        state.dirty = true;
+        state.retryNotBefore = Date.now() + EDIT_INTERVAL_MS;
+        schedule(id, EDIT_INTERVAL_MS);
+      } else if (state.handle && (result.reason === "transport-retryable" || result.reason === "commit-unknown") && state.editFailures < 3) {
+        // Editing an acknowledged message is safe to retry: it cannot create duplicates.
+        // Never apply this recovery path to an unacknowledged initial send.
+        state.editFailures++;
+        state.dirty = true;
+        state.retryNotBefore = Date.now() + Math.min(15000, 1500 * 2 ** state.editFailures);
         schedule(id, state.retryNotBefore - Date.now());
       } else {
-        // No replacement sends on unknown ACK, stale authority, or invalid edits.
-        state.failed = true;
+        // Message-unavailable and stale-handle failures are terminal for this handle.
+        // Preserve any acknowledged message handle for final cleanup.
+        // Never retry an uncertain send: doing so could create duplicates.
+        if (result.partial) {
+          state.handle = result.partial;
+          state.deliveredContext = deliveryContext;
+        }
+        retireFailedActivity(id, state);
       }
     } catch {
-      state.failed = true;
+      if (closed || activities.get(id) !== state || state.deliveryGeneration !== generation) return;
+      // An acknowledged edit is idempotent; an uncertain initial send is not.
+      if (state.handle && state.editFailures < 3) {
+        state.editFailures++;
+        state.dirty = true;
+        state.retryNotBefore = Date.now() + Math.min(15000, 1500 * 2 ** state.editFailures);
+        schedule(id, state.retryNotBefore - Date.now());
+      } else {
+        retireFailedActivity(id, state);
+      }
     } finally {
       state.pending = false;
+      if (closed || activities.get(id) !== state) return;
+      if (state.settled && state.editRetryDeadline !== undefined && Date.now() >= state.editRetryDeadline && state.dirty) {
+        retireFailedActivity(id, state);
+      }
       if (state.dirty && !closed && !state.failed && !state.timer) {
         schedule(id, EDIT_INTERVAL_MS);
       }
-      if (state.settled && state.finalDelivered) scheduleAutoDelete(id, state);
-      if (state.settled && !state.cleanup && !state.finalDelivered) {
-        state.cleanup = setTimeout(() => clearState(id), RETAIN_SETTLED_MS);
+      if (state.settled && state.finalDelivered) {
+        if (state.failed) {
+          state.dirty = false;
+          if (state.timer) { clearTimeout(state.timer); state.timer = undefined; }
+        }
+        scheduleAutoDelete(id, state);
+      }
+      if (state.settled && !state.cleanup && !state.finalDelivered && !state.timer && !state.dirty) {
+        state.cleanupDeadline ??= Date.now() + RETAIN_SETTLED_MS;
+        state.cleanup = setTimeout(() => {
+          if (activities.get(id) !== state) return;
+          if (state.pending || state.deliveryPendingDeletion) {
+            state.cleanup = undefined;
+            state.cleanupDeadline = Date.now() + RETAIN_SETTLED_MS;
+            if (state.failed) retireFailedActivity(id, state);
+            else schedule(id, EDIT_INTERVAL_MS);
+            return;
+          }
+          clearState(id);
+        }, Math.max(0, state.cleanupDeadline - Date.now()));
       }
     }
   }
 
   const dispose = registerTelegramActivityHandler({
-    id: "@llblab/pi-telegram/live-tail",
+    id: `@llblab/pi-telegram/live-tail/${++liveTailConsumerSequence}`,
     handle(event: TelegramActivityEvent, ctx: TelegramActivityContext) {
-      if (closed || event.source !== "telegram" || getSettings().enabled === false) return;
+      if (closed || event.source !== "telegram") return;
+      if (getSettings().enabled === false) {
+        clearState(event.activityId);
+        return;
+      }
       let state = activities.get(event.activityId);
       if (!state) {
         if (event.type !== "agent-start") return;
         if (activities.size >= MAX_TRACKED_ACTIVITIES) {
-          // Never evict an active message handle to start another send.
-          return;
+          // Prefer expired, settled activities. Never discard a live edit handle.
+          for (const [oldId, oldState] of activities) {
+            if (activities.size < MAX_TRACKED_ACTIVITIES) break;
+            if (oldState.settled && !oldState.pending && !oldState.timer && !oldState.dirty &&
+                (!oldState.handle || (oldState.cleanupDeadline !== undefined && Date.now() >= oldState.cleanupDeadline))) clearState(oldId);
+          }
+          if (activities.size >= MAX_TRACKED_ACTIVITIES) return;
         }
         state = {
           projection: createLiveTailProjection(event.activityId),
           pending: false, dirty: false, failed: false, settled: false, lastFlushStartedAt: 0, retryNotBefore: 0, hasContent: false, finalDelivered: false,
           replyToMessageId: event.replyToMessageId,
+          revision: 0,
+          editFailures: 0,
+          initialSendAttempted: false,
+          lastActivityAt: Date.now(),
+          deliveryGeneration: 0,
+          deliveryPendingDeletion: false,
+          missingMessageRecoveries: 0,
         };
         activities.set(event.activityId, state);
       }
+      const target = event.target ?? (ctx.defaultScope.kind === "target" ? ctx.defaultScope.target : undefined);
+      const targetKey = target ? `${target.chatId}:${target.threadId ?? ""}` : undefined;
+      if (state.deliveryTargetKey && targetKey && state.deliveryTargetKey !== targetKey) {
+        // Never edit a message using an activity that moved to another chat/thread.
+        clearState(event.activityId);
+        return;
+      }
+      if (state.deliveryTargetKey && !targetKey && ctx.defaultScope.kind !== "target") {
+        // A previously targeted activity must not fall back to a mutable active turn.
+        clearState(event.activityId);
+        return;
+      }
       if (!state.projection.accept(event)) return;
+      state.revision++;
+      state.lastActivityAt = Date.now();
+      if (targetKey) state.deliveryTargetKey = targetKey;
       state.latest = ctx;
       if ((event.type === "reasoning-delta" && event.delta.length > 0) ||
           (event.type === "reasoning-end" && event.text.length > 0) ||
           (event.type === "assistant-segment" && event.placement === "intermediate" && event.text.length > 0) ||
-          event.type === "tool-start") state.hasContent = true;
+          event.type === "tool-start" ||
+          event.type === "child-work-start" ||
+          event.type === "child-work-update" ||
+          event.type === "child-work-end" ||
+          event.type === "compaction-start" ||
+          event.type === "ui-prompt-start") state.hasContent = true;
       if (event.type === "agent-settled") {
         state.settled = true;
         if (!state.hasContent) { clearState(event.activityId); return; }
+      }
+      if (state.failed) {
+        if (state.settled && state.finalDelivered) {
+          state.dirty = false;
+          if (state.timer) { clearTimeout(state.timer); state.timer = undefined; }
+          scheduleAutoDelete(event.activityId, state);
+        }
+        else if (state.settled && !state.cleanup) {
+          state.cleanupDeadline ??= Date.now() + RETAIN_SETTLED_MS;
+          state.cleanup = setTimeout(() => clearState(event.activityId), Math.max(0, state.cleanupDeadline - Date.now()));
+        }
+        return;
       }
       if (state.pending) {
         state.dirty = true;
       } else {
         // Throttle rather than debounce: continuous token deltas must not postpone updates forever.
         if (!state.timer || state.settled) {
-          const interval = (getSettings().interval ?? 2) * 1000;
+          const configuredInterval = getSettings().interval;
+          const interval = Math.max(1, Math.min(3, typeof configuredInterval === "number" && Number.isFinite(configuredInterval) ? configuredInterval : 2)) * 1000;
           const elapsed = Date.now() - state.lastFlushStartedAt;
           schedule(event.activityId, state.settled ? 0 : Math.max(0, interval - elapsed));
         }
@@ -140,22 +342,46 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
   });
 
   function scheduleAutoDelete(id: string, state: LiveTailState): void {
-    if (!state.settled || !state.finalDelivered || state.cleanup || closed || state.pending) return;
+    if (!state.settled || !state.finalDelivered || state.cleanup || state.deliveryPendingDeletion || closed || state.pending || state.timer || state.dirty) return;
     const delay: Record<string, number | undefined> = {
       keep: undefined, immediate: 0, "5s": 5000, "15s": 15000,
       "30s": 30000, "60s": 60000,
     };
     const ms = delay[getSettings().autoDelete ?? "keep"];
     if (ms === undefined) {
-      state.cleanup = setTimeout(() => clearState(id), RETAIN_SETTLED_MS);
+      state.cleanupDeadline ??= Date.now() + RETAIN_SETTLED_MS;
+      state.cleanup = setTimeout(() => clearState(id), Math.max(0, state.cleanupDeadline - Date.now()));
       return;
     }
+    state.cleanupDeadline ??= Date.now() + ms;
     state.cleanup = setTimeout(() => {
       if (closed || activities.get(id) !== state) return;
-      if (state.pending) { state.cleanup = undefined; scheduleAutoDelete(id, state); return; }
-      if (state.handle && state.latest) void state.latest.delete(state.handle).catch(() => {});
+      if (state.pending || state.timer || state.dirty || state.deliveryPendingDeletion) {
+        state.cleanup = undefined;
+        // Active deliveries and scheduled flushes re-arm cleanup. A terminal
+        // failure must not leave a dirty state blocking deletion forever.
+        if (state.failed) {
+          state.dirty = false;
+          if (state.timer) { clearTimeout(state.timer); state.timer = undefined; }
+          if (!state.pending) scheduleAutoDelete(id, state);
+        } else if (!state.pending && !state.timer && state.dirty) {
+          schedule(id, 0);
+        }
+        return;
+      }
+      if (state.handle && (state.deliveredContext ?? state.latest)) {
+        const context = (state.deliveredContext ?? state.latest)!;
+        const handle = state.handle;
+        state.cleanup = undefined;
+        state.deliveryPendingDeletion = true;
+        // Preserve the state until deletion completes so a second cleanup cannot race it.
+        void context.delete(handle).catch(() => {}).finally(() => {
+          if (activities.get(id) === state) clearState(id);
+        });
+        return;
+      }
       clearState(id);
-    }, ms);
+    }, Math.max(0, state.cleanupDeadline - Date.now()));
   }
 
   const disposeConsumer = () => {
@@ -165,13 +391,19 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
   };
   const onFinalDelivered = (chatId: number, replyToMessageId: number | undefined) => {
     if (closed) return;
-    for (const [id, state] of activities) {
+    const candidates = [...activities.entries()].filter(([, state]) => {
       const target = state.handle?.target ?? (state.latest?.defaultScope.kind === "target" ? state.latest.defaultScope.target : undefined);
-      if (!target || target.chatId !== chatId ||
-          state.replyToMessageId !== replyToMessageId || state.finalDelivered) continue;
+      return target?.chatId === chatId && state.replyToMessageId === replyToMessageId && !state.finalDelivered && !state.deliveryPendingDeletion;
+    });
+    // A chat/reply pair can identify multiple concurrent activities. Never finalize
+    // another turn's progress message when correlation is ambiguous.
+    if (candidates.length !== 1) return;
+    for (const [id, state] of candidates) {
       state.finalDelivered = true;
       if (state.cleanup) { clearTimeout(state.cleanup); state.cleanup = undefined; }
-      scheduleAutoDelete(id, state);
+      state.cleanupDeadline = undefined;
+      // The final progress edit must complete before an immediate deletion.
+      if (state.settled && !state.pending && !state.timer && !state.dirty) scheduleAutoDelete(id, state);
     }
   };
   return { dispose: disposeConsumer, onFinalDelivered };

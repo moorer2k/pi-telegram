@@ -1,0 +1,39 @@
+name: Live Tail build artifact
+
+on:
+  push:
+    branches:
+      - feat/live-tail-progress-engine
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Compile deployable Pi Telegram extension (no tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.19.0'
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Compile TypeScript and generate dist
+        run: npm run build
+      - name: Verify extension entrypoint exists
+        run: |
+          test -f dist/index.js
+          test -f dist/pi-telegram/index.js
+          test -f dist/lib/live-tail-consumer.js
+          test -f dist/lib/activity.js
+      - name: Upload compiled distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: pi-telegram-live-tail-dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
