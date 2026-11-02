@@ -49,7 +49,7 @@ test("live tail keeps bounded reasoning and recent tool history", () => {
   for (let i = 0; i < 20; i++) {
     tail.accept({activityId:"run-3",sequence:i+2,source:"telegram",timestamp:i+2,type:"tool-start",toolCallId:String(i),toolName:"tool"+i,args:{}});
   }
-  assert.equal(tail.getSnapshot().reasoning.length, 360);
+  assert.equal(tail.getSnapshot().reasoning.length, 0); // Oversized reasoning is redacted, not truncated into a leak.
   assert.equal(tail.getSnapshot().tools.length, 20);
   assert.ok(renderLiveTail(tail.getSnapshot()).length < 4096);
 });
