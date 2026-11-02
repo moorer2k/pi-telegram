@@ -3,7 +3,7 @@
  * Zones: telegram ui, settings controls, menu composition
  * Owns hidden settings-menu rendering, settings callbacks, and persisted toggle wiring
  */
-import type { TelegramActivityVerbosity, TelegramAssistantRenderingMode, TelegramThreadDisplayMode, TelegramTimeMode } from "./config.ts";
+import type { TelegramActivityVerbosity, TelegramLiveTailSettings, TelegramAssistantRenderingMode, TelegramThreadDisplayMode, TelegramTimeMode } from "./config.ts";
 import type { TelegramInlineKeyboardMarkup } from "./keyboard.ts";
 import { type TelegramMenuMessageRuntimeDeps, type TelegramModelMenuState } from "./menu-model.ts";
 import type { MenuModel } from "./model.ts";
@@ -17,6 +17,7 @@ export interface TelegramSettingsStateDeps {
     areDraftPreviewsEnabled: () => boolean;
     getAssistantRenderingMode: () => TelegramAssistantRenderingMode;
     getActivityVerbosity: () => TelegramActivityVerbosity;
+    getLiveTailSettings?: () => TelegramLiveTailSettings;
     getTimeInjectionMode: () => TelegramTimeMode;
     getVoiceReplyMode: () => TelegramVoiceReplyMode;
     isVoiceReplyModeConfigured: () => boolean;
@@ -27,6 +28,8 @@ export interface TelegramSettingsMutationDeps extends TelegramSettingsStateDeps 
     setDraftPreviewsEnabled: (enabled: boolean) => Promise<void>;
     setAssistantRenderingMode: (mode: TelegramAssistantRenderingMode) => Promise<void>;
     setActivityVerbosity: (verbosity: TelegramActivityVerbosity) => Promise<void>;
+    setLiveTailSettings?: (patch: TelegramLiveTailSettings) => Promise<void>;
+    updateLiveTail?: () => Promise<string>;
     setVoiceReplyMode: (mode: TelegramVoiceReplyMode | undefined) => Promise<void>;
     setTimeInjectionMode: (mode: TelegramTimeMode) => Promise<void>;
     setAutomaticThreadCleanupEnabled: (enabled: boolean) => Promise<void>;

@@ -39,6 +39,15 @@ export type TelegramThreadDisplayMode = "letters" | "names" | "directories" | "d
 export declare function resolveTelegramThreadDisplayMode(config: Pick<TelegramConfig, "threads">): TelegramThreadDisplayMode;
 export declare function setTelegramThreadDisplayMode(store: TelegramConfigStore, mode: TelegramThreadDisplayMode, isCurrent: () => boolean): Promise<void>;
 export type TelegramAssistantRenderingMode = "rich" | "html";
+export type TelegramLiveTailAutoDelete = "keep" | "immediate" | "5s" | "15s" | "30s" | "60s";
+export interface TelegramLiveTailSettings {
+    enabled?: boolean;
+    detail?: "minimal" | "standard" | "detailed";
+    reasoning?: "hidden" | "collapsed" | "expanded";
+    tools?: "hidden" | "active" | "recent";
+    interval?: 1 | 2 | 3;
+    autoDelete?: TelegramLiveTailAutoDelete;
+}
 export type TelegramActivityVerbosity = "quiet" | "thinking" | "tools" | "verbose";
 export interface TelegramConfig {
     /** @deprecated persisted identity belongs in profiles.default; retained for effective/legacy views */
@@ -54,6 +63,7 @@ export interface TelegramConfig {
     outboundHandlers?: TelegramOutboundHandlerConfig[];
     assistant?: {
         draftPreviews?: boolean;
+        liveTail?: TelegramLiveTailSettings;
         rendering?: TelegramAssistantRenderingMode;
         activity?: TelegramActivityVerbosity;
         timeInjection?: TelegramTimeMode;
@@ -176,6 +186,15 @@ export declare function createTelegramProactivePushTargetGetter(deps: {
     getAllowedUserId: () => number | undefined;
 }): () => TelegramProactivePushTarget | undefined;
 export declare function createTelegramConfigControls(configStore: TelegramMutableConfigStore): {
+    getLiveTailSettings: () => {
+        enabled?: boolean;
+        detail?: "minimal" | "standard" | "detailed";
+        reasoning?: "hidden" | "collapsed" | "expanded";
+        tools?: "hidden" | "active" | "recent";
+        interval?: 1 | 2 | 3;
+        autoDelete?: TelegramLiveTailAutoDelete;
+    };
+    setLiveTailSettings: (patch: TelegramLiveTailSettings) => Promise<void>;
     areDraftPreviewsEnabled: () => boolean;
     setDraftPreviewsEnabled: (enabled: boolean) => Promise<void>;
     getAssistantRenderingMode: () => TelegramAssistantRenderingMode;

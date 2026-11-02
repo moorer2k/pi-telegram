@@ -78,6 +78,7 @@ export interface TelegramMenuCallbackRuntimeDeps<TContext, TModel extends MenuMo
     isVoiceReplyActive?: () => boolean;
 }
 export interface TelegramMenuActionRuntimeDeps<TContext, TModel extends MenuModel = MenuModel> extends TelegramMenuMessageRuntimeDeps {
+    deleteMessage?: (chatId: number, messageId: number) => Promise<void>;
     getModelMenuState: (chatId: number, ctx: TContext, threadId?: number) => Promise<TelegramModelMenuState<TModel>>;
     getActiveModel: (ctx: TContext) => TModel | undefined;
     getThinkingLevel: () => ThinkingLevel;

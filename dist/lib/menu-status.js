@@ -82,6 +82,7 @@ export function buildStatusReplyMarkup(activeModel, currentThinkingLevel, queueI
             callback_data: "menu:settings",
         },
     ]);
+    rows.push([{ text: "Close", callback_data: "menu:close" }]);
     return { inline_keyboard: rows };
 }
 export function buildTelegramStatusMenuRenderPayload(statusText, activeModel, currentThinkingLevel, queueItemCount = 0, sectionRegistry, isVoiceReplyActive, pendingCancellationCount = 0) {

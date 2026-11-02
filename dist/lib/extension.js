@@ -18,6 +18,7 @@ import * as Delivery from "./delivery.js";
 import * as Inbound from "./inbound.js";
 import * as Journal from "./journal.js";
 import * as Lifecycle from "./lifecycle.js";
+import { registerLiveTailConsumer } from "./live-tail-consumer.js";
 import * as Locks from "./locks.js";
 import * as Logging from "./logging.js";
 import * as Media from "./media.js";
@@ -40,6 +41,7 @@ import * as Replies from "./replies.js";
 import * as Routing from "./routing.js";
 import * as Runtime from "./runtime.js";
 import * as Sections from "./sections.js";
+import { updateTelegramCheckout } from "./self-update.js";
 import * as Skills from "./skills.js";
 import * as Status from "./status.js";
 import * as Sync from "./sync.js";
@@ -781,13 +783,14 @@ export default function (pi) {
         getMessageText: Replies.getAgentMessageText,
         getDefaultReplyToMessageId: activeTurnRuntime.getReplyToMessageId,
         sendDraft: nativeMarkdownDraftSender,
-        canSend: configControls.areDraftPreviewsEnabled,
+        canSend: () => !configControls.getLiveTailSettings().enabled && process.env.PI_TELEGRAM_LIVE_TAIL !== "1" && configControls.areDraftPreviewsEnabled(),
         sendMarkdownReply,
         recordRuntimeEvent,
         ...replyTransport,
     });
     const { activityRuntime, activityVerbosityRuntime, assistantOutputRuntime, publicationRuntime, } = Bindings.createTelegramActivityBindingRuntime({
         generation: deliveryGenerationSeed,
+        isLiveTailEnabled: () => configControls.getLiveTailSettings().enabled === true || process.env.PI_TELEGRAM_LIVE_TAIL === "1",
         captureDrain: captureCleanupDrain,
         assistantOutput: {
             prepareTelegramPreview: previewRuntime.preparePublication,
@@ -961,6 +964,7 @@ export default function (pi) {
         sendInteractiveMessage,
         answerCallbackQuery,
         ...configControls,
+        updateLiveTail: updateTelegramCheckout,
         reviewInactiveThreads: inactiveThreadCleanupRuntime.review,
         cleanInactiveThreads: inactiveThreadCleanupRuntime.clean,
         getThreadDisplayMode() {
@@ -2495,13 +2499,21 @@ export default function (pi) {
         recordRuntimeEvent,
     });
     // --- Lifecycle Hooks ---
+    let liveTailConsumer;
     Bindings.registerTelegramLifecycleRuntimeHooks({
         pi,
         sessionLifecycleRuntime: {
             ...sessionLifecycleRuntime,
             onModelSelect: currentModelRuntime.onModelSelect,
         },
-        activityRuntime,
+        activityRuntime: {
+            ...activityRuntime,
+            onSessionShutdown() {
+                liveTailConsumer?.dispose();
+                liveTailConsumer = undefined;
+                activityRuntime.onSessionShutdown();
+            },
+        },
         activityVerbosityRuntime,
         diagnostics: runtimeDiagnostics,
         assistantOutputRuntime,
@@ -2520,7 +2532,12 @@ export default function (pi) {
         disconnectOnQuit: cleanupTelegramThreadForSessionRestart,
         shutdownGenerativeAppLiveSurfaces: generativeAppLiveSurfaceBinding.shutdown,
         resolveAutomaticThreadCleanupEnabled: configControls.resolveAutomaticThreadCleanupEnabled,
+        onFinalTextDelivered(turn) {
+            liveTailConsumer?.onFinalDelivered(turn.chatId, turn.replyToMessageId);
+        },
         onSessionStarted(_event, ctx) {
+            liveTailConsumer?.dispose();
+            liveTailConsumer = registerLiveTailConsumer(() => ({ ...configControls.getLiveTailSettings(), enabled: configControls.getLiveTailSettings().enabled === true || process.env.PI_TELEGRAM_LIVE_TAIL === "1" }));
             sessionActionAssembly.settlement.onSessionStart(ctx);
         },
         buttonActionStore,
@@ -2542,7 +2559,11 @@ export default function (pi) {
         editGuestReply,
         editGuestInlineMessage: telegramApiRuntime.editGuestInlineMessage,
         stopGuestPlaceholder: guestPlaceholderRuntime.stop,
-        finalizeMarkdownPreview,
+        finalizeMarkdownPreview: async (...args) => {
+            if (configControls.getLiveTailSettings().enabled === true || process.env.PI_TELEGRAM_LIVE_TAIL === "1")
+                return false;
+            return finalizeMarkdownPreview(...args);
+        },
         preparePreviewDelivery,
         proactivePushTargetGetter,
         getAssistantRenderingMode: configControls.getAssistantRenderingMode,

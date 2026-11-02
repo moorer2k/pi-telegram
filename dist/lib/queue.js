@@ -1261,6 +1261,7 @@ export function createTelegramAgentEndHook(deps) {
                         await task();
                     })
                     : undefined,
+                onFinalTextDelivered: deps.onFinalTextDelivered,
                 preparePreviewDelivery: deps.preparePreviewDelivery,
                 preparePreviewClear: deps.preparePreviewClear,
                 clearPreview: deps.clearPreview,
@@ -1616,6 +1617,7 @@ export async function handleTelegramAgentEndRuntime(deps) {
                 if (!isDeliveryActive())
                     return;
                 setPreviewPendingText("");
+                deps.onFinalTextDelivered?.(turn);
             }
             catch (error) {
                 deps.recordRuntimeEvent?.("delivery", error, {

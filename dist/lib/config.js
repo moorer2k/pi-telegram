@@ -785,6 +785,17 @@ function createTelegramAutomaticThreadCleanupSetter(configStore) {
 }
 export function createTelegramConfigControls(configStore) {
     return {
+        getLiveTailSettings: () => ({ ...configStore.get().assistant?.liveTail }),
+        setLiveTailSettings: async (patch) => {
+            await loadLatestTelegramConfig(configStore);
+            const current = configStore.get();
+            const config = { ...current, assistant: {
+                    ...current.assistant,
+                    liveTail: { ...current.assistant?.liveTail, ...patch },
+                } };
+            configStore.set(config);
+            await configStore.persist(config);
+        },
         areDraftPreviewsEnabled: createTelegramDraftPreviewsChecker(configStore),
         setDraftPreviewsEnabled: createTelegramDraftPreviewsSetter(configStore),
         getAssistantRenderingMode: createTelegramAssistantRenderingModeGetter(configStore),

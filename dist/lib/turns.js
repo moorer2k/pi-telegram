@@ -21,6 +21,43 @@ export function withTelegramTurnReplyAnchor(message) {
     return { ...message, [REPLY_ANCHOR_SUPPRESSED]: false };
 }
 export const TELEGRAM_GUEST_TURN_NOTE = "[guest] delivery: answer quickly with one concise, self-contained reply";
+function getTelegramGroupSpeaker(message) {
+    const from = message?.from;
+    if (!from)
+        return undefined;
+    const username = typeof from.username === "string" && from.username.length > 0
+        ? from.username
+        : undefined;
+    if (username)
+        return username;
+    const displayName = [from.first_name, from.last_name]
+        .filter((part) => typeof part === "string" && part.length > 0)
+        .join(" ")
+        .trim();
+    if (displayName)
+        return displayName;
+    return typeof from.id === "number" ? String(from.id) : undefined;
+}
+/** Group/supergroup turns from anyone (guests) carry speaker attribution in the prompt prefix. */
+function isTelegramGroupSpeakerTurn(messages) {
+    const chat = messages[0]?.chat;
+    return chat?.type === "group" || chat?.type === "supergroup";
+}
+function formatTelegramGroupSpeakerPeer(messages, allowedUserId) {
+    for (const message of messages) {
+        if (message?.from?.id === allowedUserId)
+            continue;
+        const speaker = getTelegramGroupSpeaker(message);
+        if (speaker) {
+            // Always carry the numeric from.id alongside the display identity so
+            // a guest speaker can be bound to a known ID (e.g. Justin = 1142693467).
+            const id = message?.from?.id;
+            const idAttr = typeof id === "number" ? `|from-id:${id}` : "";
+            return `${speaker}${idAttr}`;
+        }
+    }
+    return undefined;
+}
 function getTelegramTurnTarget(message) {
     return Number.isInteger(message.message_thread_id)
         ? { chatId: message.chat.id, threadId: message.message_thread_id }
@@ -339,12 +376,24 @@ export function createTelegramPromptTurnRuntimePreparer(deps) {
         const threadLabel = firstMessage
             ? deps.getTelegramThreadLabel?.(firstMessage)
             : undefined;
+        // Group turns from the paired owner are direct turns (no speaker tag,
+        // no guest note); turns from other members are guest turns with the
+        // speaker's identity carried in the prefix.
+        const firstFrom = firstMessage?.from;
+        const groupTurn = isTelegramGroupSpeakerTurn(messages) &&
+            firstFrom?.id !== undefined &&
+            firstFrom.id !== deps.getAllowedUserId?.();
+        const groupSpeaker = groupTurn
+            ? formatTelegramGroupSpeakerPeer(messages, deps.getAllowedUserId?.())
+            : undefined;
         const telegramPrefix = createTelegramTurnPrefix({
             thread: threadLabel,
             "from-thread": firstMessage?.pi_telegram_agent_source_thread,
+            ...(groupSpeaker ? { from: groupSpeaker } : {}),
         });
         const buildTurn = await prepareTelegramPromptTurn({
             telegramPrefix,
+            ...(groupSpeaker ? { guestTurn: true } : {}),
             messages,
             readBinaryFile: readFile,
             rawText: promptRawText,

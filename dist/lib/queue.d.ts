@@ -473,6 +473,7 @@ export interface TelegramAgentEndRuntimeDeps<TTurn extends PendingTelegramTurn, 
     updateStatus: () => void;
     dispatchNextQueuedTelegramTurn: () => void;
     scheduleActiveTurnDelivery?: (task: () => Promise<void>) => void;
+    onFinalTextDelivered?: (turn: TTurn) => void;
     preparePreviewDelivery?: (isDeliveryActive: () => boolean) => Pick<TelegramAgentEndRuntimeDeps<TTurn, TReplyMarkup>, "clearPreview" | "setPreviewPendingText" | "finalizeMarkdownPreview"> | undefined;
     preparePreviewClear?: (chatId: number, options?: {
         target?: TelegramQueueTarget;
@@ -537,6 +538,7 @@ export interface TelegramAgentEndHookRuntimeDeps<TTurn extends PendingTelegramTu
     dispatchNextQueuedTelegramTurn: (ctx: TContext) => void;
     requestDeferredDispatchNextQueuedTelegramTurn: (dispatch: (ctx: TContext) => void) => void;
     scheduleActiveTurnDelivery?: TelegramAgentEndRuntimeDeps<TTurn, TReplyMarkup>["scheduleActiveTurnDelivery"];
+    onFinalTextDelivered?: (turn: TTurn) => void;
     reserveActiveTurnDelivery?: () => {
         schedule: (task: () => Promise<void>) => void;
         cancel: () => void;

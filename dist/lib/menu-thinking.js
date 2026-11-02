@@ -47,6 +47,7 @@ export function buildThinkingMenuReplyMarkup(currentThinkingLevel) {
         callback_data: `thinking:set:${level}`,
     }));
     rows.push(levelButtons.slice(0, 1), levelButtons.slice(1, 4), levelButtons.slice(4, 7));
+    rows.push([{ text: "Close", callback_data: "menu:close" }]);
     return { inline_keyboard: rows };
 }
 export function buildTelegramThinkingMenuRenderPayload(_activeModel, currentThinkingLevel) {

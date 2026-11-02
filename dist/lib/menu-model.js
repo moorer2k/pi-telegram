@@ -560,21 +560,26 @@ export async function handleTelegramModelMenuCallbackAction(callbackQueryId, par
     };
     if (plan.mode === "restart-after-tool") {
         deps.stagePendingModelSwitch(plan.selection, continuationTurn);
-        await deps.updateModelMenuMessage();
+        if (deps.confirmModelSelection)
+            await deps.confirmModelSelection("Model change scheduled after the active tool finishes.");
+        else
+            await deps.updateModelMenuMessage();
         await deps.answerCallbackQuery(callbackQueryId, plan.callbackText);
         return true;
     }
     if (plan.mode === "restart-now") {
         const restarted = await deps.restartInterruptedTelegramTurn(plan.selection, continuationTurn);
-        await deps.updateModelMenuMessage();
+        if (!restarted)
+            await deps.updateModelMenuMessage();
         if (!restarted) {
             await deps.answerCallbackQuery(callbackQueryId, "Pi is busy. Send /abort, /next, or /stop");
             return true;
         }
     }
-    else {
+    if (deps.confirmModelSelection)
+        await deps.confirmModelSelection("Model selected: " + plan.callbackText);
+    else
         await deps.updateModelMenuMessage();
-    }
     await deps.answerCallbackQuery(callbackQueryId, plan.callbackText);
     return true;
 }
@@ -623,13 +628,14 @@ export function buildModelMenuReplyMarkup(state, currentModel, pageSize) {
             callback_data: `model:open:${menuPage.start + index}`,
         },
     ]));
+    rows.push([{ text: "Close", callback_data: "menu:close" }]);
     return { inline_keyboard: rows };
 }
 function buildModelDetailMenuReplyMarkup(state, currentModel) {
     const selection = getTelegramSelectedDetailModel(state);
     if (selection.kind !== "selected") {
         return {
-            inline_keyboard: [
+            inline_keyboard: [[{ text: "Close", callback_data: "menu:close" }],
                 [{ text: "⬆️ Back", callback_data: "model:pages:back" }],
             ],
         };
@@ -682,6 +688,7 @@ export function buildModelPageMenuReplyMarkup(state, pageSize) {
             };
         }));
     }
+    rows.push([{ text: "Close", callback_data: "menu:close" }]);
     return { inline_keyboard: rows };
 }
 export function buildTelegramModelPageMenuRenderPayload(state) {

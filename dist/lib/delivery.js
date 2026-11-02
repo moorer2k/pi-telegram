@@ -97,9 +97,12 @@ export function createTelegramDeliveryTargetPolicyRuntime(deps) {
             };
         },
         getActiveTurnTarget() {
-            return deps.getActiveGuestQueryId()
-                ? undefined
-                : deps.getActiveTurnTarget();
+            // Live-tail (and other active-turn activity) must resolve the turn's
+            // chat even for guest turns: their answer still flows through
+            // answerGuestQuery, but the activity card is a plain post in the
+            // same chat. The explicit-target auth check (chatId === allowedChatId)
+            // keeps this safe.
+            return deps.getActiveTurnTarget();
         },
     };
 }

@@ -160,6 +160,7 @@ export function buildTelegramSettingsMenuReplyMarkup(draftPreviewsEnabled, assis
             : true;
     const rows = [
         [{ text: "⬆️ Main menu", callback_data: "menu:back" }],
+        [{ text: "Close", callback_data: "menu:close" }],
     ];
     const settingsButtons = [
         {
@@ -178,6 +179,7 @@ export function buildTelegramSettingsMenuReplyMarkup(draftPreviewsEnabled, assis
             text: `🔬 Activity: ${activityVerbosity}`,
             callback_data: "settings:open:activity-verbosity",
         },
+        { text: "Live Tail settings", callback_data: "settings:open:live-tail" },
         {
             text: `🕒 Time injection: ${getTelegramSettingsStateValueLabel(timeInjectionMode)}`,
             callback_data: "settings:open:time-injection",
@@ -357,6 +359,64 @@ async function updateAssistantRenderingSettingsMessage(deps) {
     const mode = deps.getAssistantRenderingMode();
     await deps.updateSettingsMessage(buildAssistantRenderingSettingsText(mode), buildAssistantRenderingSettingsReplyMarkup(mode));
 }
+function liveTailSettingsMarkup(settings) {
+    const enabled = settings.enabled !== false;
+    const detail = settings.detail ?? "standard";
+    const reasoning = settings.reasoning ?? "collapsed";
+    const tools = settings.tools ?? "recent";
+    const interval = String(settings.interval ?? 2);
+    const autoDelete = settings.autoDelete ?? "keep";
+    const rows = [
+        [
+            { text: enabled ? "🟢 Live Tail ON" : "⚪ Live Tail OFF", callback_data: "settings:live-tail:enabled:" + (enabled ? "off" : "on") },
+            { text: "🔄 Reload", callback_data: "settings:live-tail:update" },
+        ],
+        [
+            { text: "📊 " + detail, callback_data: "settings:live-tail:choose:detail" },
+            { text: "🧠 " + reasoning, callback_data: "settings:live-tail:choose:reasoning" },
+        ],
+        [
+            { text: "🛠 " + tools, callback_data: "settings:live-tail:choose:tools" },
+            { text: "⏱ " + interval + "s", callback_data: "settings:live-tail:choose:interval" },
+        ],
+        [
+            { text: "🗑 Auto-delete: " + autoDelete, callback_data: "settings:live-tail:choose:autoDelete" },
+        ],
+        [
+            { text: "◀ Back", callback_data: "settings:list" },
+            { text: "✕ Close", callback_data: "menu:close" },
+        ],
+    ];
+    return { inline_keyboard: rows };
+}
+const LIVE_TAIL_CHOICES = {
+    detail: { title: "Detail", icon: "📊", values: ["minimal", "standard", "detailed"] },
+    reasoning: { title: "Reasoning", icon: "🧠", values: ["hidden", "collapsed", "expanded"] },
+    tools: { title: "Tools", icon: "🛠", values: ["hidden", "active", "recent"] },
+    interval: { title: "Refresh", icon: "⏱", values: ["1", "2", "3"] },
+    autoDelete: { title: "Auto-delete", icon: "🗑", values: ["keep", "immediate", "5s", "15s", "30s", "60s"] },
+};
+function liveTailChoiceMarkup(key, settings) {
+    const choice = LIVE_TAIL_CHOICES[key];
+    const current = key === "interval" ? String(settings.interval ?? 2)
+        : key === "autoDelete" ? settings.autoDelete ?? "keep"
+            : key === "detail" ? settings.detail ?? "standard"
+                : key === "reasoning" ? settings.reasoning ?? "collapsed"
+                    : settings.tools ?? "recent";
+    const buttons = choice.values.map(value => ({
+        text: (value === current ? "✓ " : "") + (key === "interval" ? value + "s" : value),
+        callback_data: "settings:live-tail:" + key + ":" + value,
+    }));
+    const rows = [];
+    for (let i = 0; i < buttons.length; i += 3)
+        rows.push(buttons.slice(i, i + 3));
+    rows.push([{ text: "◀ Live Tail", callback_data: "settings:open:live-tail" }, { text: "✕ Close", callback_data: "menu:close" }]);
+    return { inline_keyboard: rows };
+}
+async function updateLiveTailSettingsMessage(deps) {
+    const settings = deps.getLiveTailSettings?.() ?? {};
+    await deps.updateSettingsMessage("<b>⚡ Live Tail</b>\nConfigure activity display. Select a category to edit.", liveTailSettingsMarkup(settings));
+}
 async function updateActivityVerbositySettingsMessage(deps) {
     const verbosity = deps.getActivityVerbosity();
     await deps.updateSettingsMessage(buildActivityVerbositySettingsText(verbosity), buildActivityVerbositySettingsReplyMarkup(verbosity));
@@ -430,6 +490,64 @@ export async function handleTelegramSettingsMenuCallbackAction(callbackQueryId, 
     }
     if (data === "settings:open:assistant-rendering") {
         await updateAssistantRenderingSettingsMessage(deps);
+        await deps.answerCallbackQuery(callbackQueryId);
+        return true;
+    }
+    if (data === "settings:open:live-tail") {
+        await updateLiveTailSettingsMessage(deps);
+        await deps.answerCallbackQuery(callbackQueryId);
+        return true;
+    }
+    if (data.startsWith("settings:live-tail:choose:")) {
+        const key = data.slice("settings:live-tail:choose:".length);
+        const choice = LIVE_TAIL_CHOICES[key];
+        if (!choice) {
+            await deps.answerCallbackQuery(callbackQueryId, "Unknown setting");
+            return true;
+        }
+        await deps.updateSettingsMessage("<b>" + choice.icon + " " + choice.title + "</b>\nChoose an option.", liveTailChoiceMarkup(key, deps.getLiveTailSettings?.() ?? {}));
+        await deps.answerCallbackQuery(callbackQueryId);
+        return true;
+    }
+    if (data === "settings:live-tail:update") {
+        await deps.updateSettingsMessage(`<b>Update Live Tail</b>\nPull the configured branch, rebuild and restart the configured service. Requires a clean checkout.`, { inline_keyboard: [
+                [{ text: "Confirm update", callback_data: "settings:live-tail:confirm" }],
+                [{ text: "Cancel", callback_data: "settings:open:live-tail" }],
+            ] });
+        await deps.answerCallbackQuery(callbackQueryId);
+        return true;
+    }
+    if (data === "settings:live-tail:confirm") {
+        if (!deps.updateLiveTail) {
+            await deps.answerCallbackQuery(callbackQueryId, "Updater not configured");
+            return true;
+        }
+        await deps.answerCallbackQuery(callbackQueryId, "Starting update");
+        await deps.updateSettingsMessage("<b>Live Tail</b>\nUpdating...", { inline_keyboard: [] });
+        try {
+            const result = await deps.updateLiveTail();
+            await deps.updateSettingsMessage("<b>Live Tail</b>\n" + result, { inline_keyboard: [] });
+        }
+        catch (error) {
+            const message = String(error).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+            await deps.updateSettingsMessage("<b>Update failed</b>\n" + message, { inline_keyboard: [[{ text: "Back", callback_data: "settings:open:live-tail" }]] });
+        }
+        return true;
+    }
+    if (data.startsWith("settings:live-tail:")) {
+        const [, , key, value] = data.split(":");
+        const allowed = {
+            enabled: ["on", "off"], detail: ["minimal", "standard", "detailed"],
+            reasoning: ["hidden", "collapsed", "expanded"], tools: ["hidden", "active", "recent"],
+            interval: ["1", "2", "3"], autoDelete: ["keep", "immediate", "5s", "15s", "30s", "60s"],
+        };
+        if (allowed[key]?.includes(value) && deps.setLiveTailSettings) {
+            const parsed = key === "enabled" ? { enabled: value === "on" }
+                : key === "interval" ? { interval: Number(value) }
+                    : { [key]: value };
+            await deps.setLiveTailSettings(parsed);
+            await updateLiveTailSettingsMessage(deps);
+        }
         await deps.answerCallbackQuery(callbackQueryId);
         return true;
     }
@@ -569,6 +687,7 @@ export function createTelegramSettingsMenuRuntime(deps, sectionRegistry) {
         areDraftPreviewsEnabled: deps.areDraftPreviewsEnabled,
         getAssistantRenderingMode: deps.getAssistantRenderingMode,
         getActivityVerbosity: deps.getActivityVerbosity,
+        getLiveTailSettings: deps.getLiveTailSettings,
         getVoiceReplyMode: deps.getVoiceReplyMode,
         isVoiceReplyModeConfigured: deps.isVoiceReplyModeConfigured,
         getTimeInjectionMode: deps.getTimeInjectionMode,
@@ -612,12 +731,21 @@ export function createTelegramSettingsMenuRuntime(deps, sectionRegistry) {
                 state.mode = "settings";
                 deps.storeModelMenuState(state);
             }
-            return handleTelegramSettingsMenuCallbackAction(query.id, query.data, {
+            const settingAction = query.data;
+            const settingLabels = {
+                "settings:set:draft-previews:on": "Draft previews enabled",
+                "settings:set:draft-previews:off": "Draft previews disabled",
+                "settings:set:automatic-thread-cleanup:on": "Automatic thread cleanup enabled",
+                "settings:set:automatic-thread-cleanup:off": "Automatic thread cleanup disabled",
+            };
+            const handled = await handleTelegramSettingsMenuCallbackAction(query.id, query.data, {
                 ...readSettingsState(),
                 setThreadDisplayMode: deps.setThreadDisplayMode,
                 setDraftPreviewsEnabled: deps.setDraftPreviewsEnabled,
                 setAssistantRenderingMode: deps.setAssistantRenderingMode,
                 setActivityVerbosity: deps.setActivityVerbosity,
+                setLiveTailSettings: deps.setLiveTailSettings,
+                updateLiveTail: deps.updateLiveTail,
                 setVoiceReplyMode: deps.setVoiceReplyMode,
                 setTimeInjectionMode: deps.setTimeInjectionMode,
                 setAutomaticThreadCleanupEnabled: deps.setAutomaticThreadCleanupEnabled,
@@ -631,6 +759,26 @@ export function createTelegramSettingsMenuRuntime(deps, sectionRegistry) {
                 answerCallbackQuery: deps.answerCallbackQuery,
                 sectionRegistry,
             });
+            if (handled && settingAction && settingAction.startsWith("settings:live-tail:") && !["settings:live-tail:update", "settings:live-tail:confirm", "settings:live-tail:noop"].includes(settingAction)) {
+                const parts = settingAction.split(":");
+                const key = parts[2], value = parts[3];
+                const allowed = {
+                    enabled: ["on", "off"], detail: ["minimal", "standard", "detailed"],
+                    reasoning: ["hidden", "collapsed", "expanded"], tools: ["hidden", "active", "recent"],
+                    interval: ["1", "2", "3"], autoDelete: ["keep", "immediate", "5s", "15s", "30s", "60s"],
+                };
+                if (allowed[key]?.includes(value)) {
+                    await deps.editInteractiveMessage(state.chatId, state.messageId, "<b>Setting saved</b>\nLive Tail " + key + ": " + value, "html", { inline_keyboard: [] });
+                }
+            }
+            else if (handled && settingAction && settingAction.startsWith("settings:set:") && !settingLabels[settingAction]) {
+                const safe = settingAction.slice("settings:set:".length).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+                await deps.editInteractiveMessage(state.chatId, state.messageId, "<b>Setting applied</b>\n" + safe, "html", { inline_keyboard: [] });
+            }
+            else if (handled && settingAction && settingLabels[settingAction]) {
+                await deps.editInteractiveMessage(state.chatId, state.messageId, "<b>Setting saved</b>\n" + settingLabels[settingAction], "html", { inline_keyboard: [] });
+            }
+            return handled;
         },
     };
 }

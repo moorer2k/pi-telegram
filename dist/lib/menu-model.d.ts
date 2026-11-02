@@ -99,6 +99,7 @@ export type TelegramModelMenuCallbackDeps<TModel extends MenuModel = MenuModel> 
     answerCallbackQuery: (callbackQueryId: string, text?: string) => Promise<void>;
     updateModelMenuMessage: () => Promise<void>;
     updateStatusMessage: () => Promise<void>;
+    confirmModelSelection?: (description: string) => Promise<void>;
     persistScopedModelPatterns?: (patterns: string[]) => Promise<void>;
     setModel: (model: TModel) => Promise<boolean>;
     setCurrentModel: (model: TModel) => void;
