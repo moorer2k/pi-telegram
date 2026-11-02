@@ -1,6 +1,7 @@
 /**
  * Optional live-tail consumer. One bounded, editable Telegram message per activity.
  * Delivery remains authorized and generation-fenced by the Activity API.
+ * Zones: telegram, pi agent
  */
 import { registerTelegramActivityHandler, type TelegramActivityContext, type TelegramActivityEvent } from "./activity.ts";
 import { createLiveTailProjection, renderLiveTail } from "./live-tail.ts";
