@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - feat/live-tail-progress-engine
   pull_request:
   workflow_call:
 
@@ -42,6 +43,14 @@ jobs:
         run: npm ci
       - name: Build distributive
         run: npm run build
+      - name: Upload compiled Live Tail dist
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pi-telegram-live-tail-dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
       - name: Run typecheck
         run: npm run typecheck
       - name: Run Windows bus lifecycle probes

@@ -3,6 +3,7 @@
  *
  * This module deliberately does not send Telegram messages. The activity
  * consumer owns one send/edit handle and schedules throttled flushes.
+ * Zones: telegram, pi agent
  */
 import type { TelegramActivityEvent } from "./activity.ts";
 import type { TelegramLiveTailSettings } from "./config.ts";
@@ -11,9 +12,13 @@ export interface LiveTailTool {
   id: string;
   name: string;
   command?: string;
+  update?: string;
+  result?: string;
+  kind?: "tool" | "task" | "subagent" | "background";
+  parentToolCallId?: string;
   startedAt: number;
   elapsedMs?: number;
-  state: "running" | "done" | "error";
+  state: "running" | "done" | "error" | "interrupted";
 }
 
 export interface LiveTailSnapshot {
@@ -22,34 +27,67 @@ export interface LiveTailSnapshot {
   earlierReasoning: string;
   plan: string;
   tools: LiveTailTool[];
+  childWork: LiveTailTool[];
+  totalChildWork: number;
+  completedChildWork: number;
+  failedChildWork: number;
+  interruptedChildWork: number;
+  subagentWorkTotal: number;
+  backgroundWorkTotal: number;
   settled: boolean;
+  phase: "running" | "compacting" | "awaiting-input" | "finished";
+  prompt?: string;
   updatedAt: number;
+  startedAt: number;
+  totalTools: number;
+  completedTools: number;
+  failedTools: number;
+  interruptedTools: number;
 }
 
-const MAX_REASONING = 500;
+const MAX_REASONING = 360;
 const MAX_EARLIER = 600;
 const MAX_PLAN = 400;
-const MAX_TOOLS = 12;
+const MAX_TOOLS = 24;
+const MAX_ACTIVE_TOOLS = 64;
 
-/** Only surface an explicit command/path, never arbitrary serialized tool arguments.
- * Reject credential-bearing or shell-environment assignments before showing a preview.
- */
+/** Only explicit, bounded display fields are allowed. Suppress likely secrets. */
+function safePreview(value: unknown, max = 160): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const text = value.replace(/\s+/g, " ").trim();
+  if (/\b(?:[A-Za-z0-9+/]{48,}={0,2}|[A-Fa-f0-9]{64,})\b/.test(text)) return undefined;
+  // Shell previews can include literal values and URLs containing credentials.
+  if (/(?:[a-z][a-z0-9+.-]*:\/\/[^\s/@]+:[^\s/@]+@|(?:^|\s)(?:-p|--password|--token|--secret)(?:=|\s+)|(?:^|\s)[A-Z][A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD)\s*=)/i.test(text)) return undefined;
+  if (/(?:x-api-key|x-auth-token|authorization\s*[:=]|(?:^|\s)--(?:api-key|access-key|client-secret|auth|credential)(?:=|\s+))/i.test(text)) return undefined;
+  if (!text) return undefined;
+  const forbidden = ["password", "passwd", "secret", "token", "api_key", "apikey", "authorization", "bearer ", "private_key", "credential", ".env", "--key", "--password", "aws_access_key", "session_key"];
+  if (forbidden.some(word => text.toLowerCase().includes(word))) return undefined;
+  if (/\b(?:gh[pousr]_[A-Za-z0-9_]{12,}|sk-[A-Za-z0-9_-]{12,}|AKIA[0-9A-Z]{16})\b/.test(text)) return undefined;
+  return text.slice(0, max);
+}
+
 function toolCommand(name: string, args: unknown): string | undefined {
   if (!args || typeof args !== "object" || Array.isArray(args)) return undefined;
   const data = args as Record<string, unknown>;
-  const candidates = /^(bash|terminal|exec|shell|command|run|ssh)$/i.test(name)
-    ? ["command", "cmd", "script"]
-    : /^(read_file|write_file|edit_file|read|write|edit|grep|find|ls|search)$/i.test(name)
-      ? ["path", "file_path", "filePath", "pattern", "query"]
-      : [];
-  const key = candidates.find(k => typeof data[k] === "string");
-  if (!key) return undefined;
-  const value = String(data[key]).replace(/[\r\n\t]+/g, " ").trim();
-  if (!value || /(?:password|passwd|secret|token|api[_-]?key|authorization|bearer|private[_-]?key|credential|--password|--token|--key|\.env(?:\b|\/))/i.test(value)) return undefined;
-  if (/(?:^|\s)[A-Za-z_][A-Za-z0-9_]*(?:PASSWORD|TOKEN|SECRET|KEY)\s*=/.test(value)) return undefined;
-  return value.length > 180 ? value.slice(0, 177) + "..." : value;
+  const shell = /bash|terminal|exec|shell|command|run|ssh/i.test(name);
+  const keys = shell ? ["command", "cmd", "script"] : ["path", "file_path", "filePath", "pattern", "query", "description", "task", "command"];
+  for (const key of keys) {
+    const value = safePreview(data[key], 180);
+    if (value) return value;
+  }
+  return undefined;
 }
 
+function toolSummary(value: unknown): string | undefined {
+  if (typeof value === "string") return safePreview(value, 120);
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const data = value as Record<string, unknown>;
+  for (const key of ["text", "message", "summary", "status", "output"]) {
+    const preview = safePreview(data[key], 120);
+    if (preview) return preview;
+  }
+  return undefined;
+}
 
 function appendBounded(current: string, addition: string, limit: number): string {
   return (current + addition).slice(-limit);
@@ -58,52 +96,184 @@ function appendBounded(current: string, addition: string, limit: number): string
 export function createLiveTailProjection(activityId: string) {
   const snapshot: LiveTailSnapshot = {
     activityId, reasoning: "", earlierReasoning: "", plan: "",
-    tools: [], settled: false, updatedAt: 0,
+    tools: [], childWork: [], totalChildWork: 0, completedChildWork: 0, failedChildWork: 0, interruptedChildWork: 0, subagentWorkTotal: 0, backgroundWorkTotal: 0, settled: false, phase: "running", updatedAt: 0, startedAt: 0, totalTools: 0, completedTools: 0, failedTools: 0, interruptedTools: 0,
   };
   let reasoningIndex: number | undefined;
   let lastSequence = -1;
+  const seenChildIds = new Set<string>();
+  const MAX_CHILD_HISTORY = 24;
+  const endedChildIds = new Set<string>();
+  const seenToolIds = new Set<string>();
+  const finishedToolIds = new Set<string>();
+  let firstTimestampSeen = false;
+  const safeText = (value: string, max: number) => safePreview(value, max) ?? "";
+  const safeReasoning = (value: string) => safeText(value, MAX_REASONING);
+  let reasoningRedacted = false;
 
   function accept(event: TelegramActivityEvent): boolean {
     if (event.activityId !== activityId || event.sequence <= lastSequence || snapshot.settled) return false;
+    if (!Number.isFinite(event.timestamp) || event.timestamp < 0 || !Number.isSafeInteger(event.sequence) || event.sequence < 0) return false;
     lastSequence = event.sequence;
-    snapshot.updatedAt = event.timestamp;
+    snapshot.updatedAt = Math.max(snapshot.updatedAt, event.timestamp);
+    if (!firstTimestampSeen) {
+      snapshot.startedAt = event.timestamp;
+      firstTimestampSeen = true;
+    }
     switch (event.type) {
       case "reasoning-delta":
         if (reasoningIndex !== undefined && reasoningIndex !== event.contentIndex) {
           snapshot.earlierReasoning = appendBounded(snapshot.earlierReasoning, snapshot.reasoning + "\n", MAX_EARLIER);
           snapshot.reasoning = "";
+          reasoningRedacted = false;
         }
         reasoningIndex = event.contentIndex;
-        snapshot.reasoning = appendBounded(snapshot.reasoning, event.delta, MAX_REASONING);
+        const combinedReasoning = appendBounded(snapshot.reasoning, event.delta, MAX_REASONING);
+        if (reasoningRedacted || (combinedReasoning && !safeReasoning(combinedReasoning))) {
+          snapshot.reasoning = "";
+          reasoningRedacted = true;
+        } else snapshot.reasoning = safeReasoning(combinedReasoning);
         break;
       case "reasoning-end":
+        if (reasoningIndex !== undefined && reasoningIndex !== event.contentIndex && snapshot.reasoning) {
+          snapshot.earlierReasoning = appendBounded(snapshot.earlierReasoning, snapshot.reasoning + "\n", MAX_EARLIER);
+        }
+        const endingSameSegment = reasoningIndex === event.contentIndex;
         reasoningIndex = event.contentIndex;
-        snapshot.reasoning = event.text.slice(-MAX_REASONING);
+        // A final segment must not resurrect content suppressed by earlier deltas.
+        snapshot.reasoning = reasoningRedacted && endingSameSegment
+          ? "" : safeText(event.text.slice(-MAX_REASONING), MAX_REASONING);
+        reasoningRedacted = false;
         break;
       case "assistant-segment":
-        if (event.placement === "intermediate") snapshot.plan = event.text.slice(-MAX_PLAN);
+        if (event.placement === "intermediate") snapshot.plan = safeText(event.text.slice(-MAX_PLAN), MAX_PLAN);
         break;
       case "tool-start":
-        snapshot.tools.push({ id: event.toolCallId, name: event.toolName.slice(0, 70), command: toolCommand(event.toolName, event.args), startedAt: event.timestamp, state: "running" });
-        if (snapshot.tools.length > MAX_TOOLS) snapshot.tools.splice(0, snapshot.tools.length - MAX_TOOLS);
+        if (!event.toolCallId || seenToolIds.has(event.toolCallId)) break;
+        seenToolIds.add(event.toolCallId);
+        snapshot.totalTools++;
+        snapshot.tools.push({ id: event.toolCallId, name: safeText(event.toolName, 70) || "tool", kind: /todo|task/i.test(event.toolName) ? "task" : "tool", command: toolCommand(event.toolName, event.args), startedAt: event.timestamp, state: "running" });
+        if (snapshot.tools.length > MAX_TOOLS) {
+          const finishedIndex = snapshot.tools.findIndex(t => t.state !== "running");
+          if (finishedIndex >= 0) snapshot.tools.splice(finishedIndex, 1);
+        }
+        if (snapshot.tools.length > MAX_ACTIVE_TOOLS) {
+          // Bound pathological concurrency without misreporting an evicted tool as completed.
+          snapshot.tools.shift();
+        }
         break;
-      case "tool-end": {
+      case "tool-update": {
+        if (finishedToolIds.has(event.toolCallId)) break;
         const tool = snapshot.tools.find(t => t.id === event.toolCallId);
-        if (tool) {
-          tool.state = event.isError ? "error" : "done";
-          tool.elapsedMs = Math.max(0, event.timestamp - tool.startedAt);
+        if (tool && tool.state === "running") {
+          const update = toolSummary(event.update);
+          if (update !== undefined) tool.update = update;
         }
         break;
       }
+      case "tool-end": {
+        const tool = snapshot.tools.find(t => t.id === event.toolCallId);
+        if (!seenToolIds.has(event.toolCallId) || finishedToolIds.has(event.toolCallId)) break;
+        finishedToolIds.add(event.toolCallId);
+        if (event.isError) snapshot.failedTools++; else snapshot.completedTools++;
+        if (tool && tool.state === "running") {
+          tool.state = event.isError ? "error" : "done";
+          tool.elapsedMs = Math.max(0, event.timestamp - tool.startedAt);
+          tool.result = toolSummary(event.result);
+        }
+        break;
+      }
+      case "child-work-start": {
+        if (!event.workId || seenChildIds.has(event.workId)) break;
+        seenChildIds.add(event.workId);
+        snapshot.totalChildWork++;
+        if (event.kind === "subagent") snapshot.subagentWorkTotal++;
+        else snapshot.backgroundWorkTotal++;
+        snapshot.childWork.push({ id: event.workId, name: safeText(event.label, 70) || event.kind, kind: event.kind, parentToolCallId: event.parentToolCallId, startedAt: event.timestamp, state: "running" });
+        let finishedChildren = snapshot.childWork.reduce((count, child) => count + (child.state !== "running" ? 1 : 0), 0);
+        while (finishedChildren > MAX_CHILD_HISTORY) {
+          const oldestFinished = snapshot.childWork.findIndex(t => t.state !== "running");
+          if (oldestFinished < 0) break;
+          snapshot.childWork.splice(oldestFinished, 1);
+          finishedChildren--;
+        }
+        if (snapshot.childWork.length > MAX_ACTIVE_TOOLS) {
+          const oldestFinished = snapshot.childWork.findIndex(t => t.state !== "running");
+          snapshot.childWork.splice(oldestFinished < 0 ? 0 : oldestFinished, 1);
+        }
+        break;
+      }
+      case "child-work-update": {
+        if (endedChildIds.has(event.workId)) break;
+        const child = snapshot.childWork.find(t => t.id === event.workId && t.state === "running");
+        if (child) child.update = safeText(event.message, 120) || child.update;
+        break;
+      }
+      case "child-work-end": {
+        if (!seenChildIds.has(event.workId) || endedChildIds.has(event.workId)) break;
+        endedChildIds.add(event.workId);
+        if (event.isError) snapshot.failedChildWork++; else snapshot.completedChildWork++;
+        const child = snapshot.childWork.find(t => t.id === event.workId && t.state === "running");
+        if (child) {
+          child.state = event.isError ? "error" : "done";
+          child.elapsedMs = Math.max(0, event.timestamp - child.startedAt);
+          child.result = event.result ? safeText(event.result, 120) : undefined;
+        }
+        let completedHistory = snapshot.childWork.reduce((n, t) => n + (t.state !== "running" ? 1 : 0), 0);
+        while (completedHistory > MAX_CHILD_HISTORY) {
+          const oldestFinished = snapshot.childWork.findIndex(t => t.state !== "running");
+          if (oldestFinished < 0) break;
+          snapshot.childWork.splice(oldestFinished, 1);
+          completedHistory--;
+        }
+        break;
+      }
+      case "compaction-start":
+        snapshot.phase = "compacting";
+        snapshot.prompt = undefined;
+        break;
+      case "compaction-end":
+        if (snapshot.phase === "compacting") snapshot.phase = "running";
+        break;
+      case "ui-prompt-start":
+        snapshot.phase = "awaiting-input";
+        snapshot.prompt = event.title ? safeText(event.title, 120) || "Input requested" : event.kind;
+        break;
+      case "ui-prompt-end":
+        if (snapshot.phase === "awaiting-input") {
+          snapshot.phase = "running";
+          snapshot.prompt = undefined;
+        }
+        break;
       case "agent-settled":
+        snapshot.phase = "finished";
+        snapshot.prompt = undefined;
         snapshot.settled = true;
+        for (const tool of snapshot.tools) {
+          if (tool.state === "running") {
+            tool.state = "interrupted";
+            tool.elapsedMs = Math.max(0, event.timestamp - tool.startedAt);
+          }
+        }
+        for (const child of snapshot.childWork) {
+          if (child.state === "running") {
+            child.state = "interrupted";
+            child.elapsedMs = Math.max(0, event.timestamp - child.startedAt);
+          }
+        }
+        snapshot.interruptedChildWork = Math.max(0, snapshot.totalChildWork - snapshot.completedChildWork - snapshot.failedChildWork);
+        seenChildIds.clear();
+        endedChildIds.clear();
+        // Include running records evicted under extreme concurrency.
+        snapshot.interruptedTools = Math.max(0, snapshot.totalTools - snapshot.completedTools - snapshot.failedTools);
+        seenToolIds.clear();
+        finishedToolIds.clear();
         break;
     }
     return true;
   }
 
   function getSnapshot(): LiveTailSnapshot {
-    return { ...snapshot, tools: snapshot.tools.map(t => ({ ...t })) };
+    return { ...snapshot, tools: snapshot.tools.map(t => ({ ...t })), childWork: snapshot.childWork.map(t => ({ ...t })) };
   }
   return { accept, getSnapshot };
 }
@@ -116,62 +286,90 @@ export function escapeTelegramHtml(text: string): string {
 /** Telegram supports expandable blockquotes, not arbitrary collapsible message sections.
  * Keep current work visible; fold older reasoning and completed tools in detailed mode.
  */
+/** Build complete HTML sections within the Telegram message limit.
+ * Never truncate already-escaped markup or cut through an HTML entity/tag.
+ */
 export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiveTailSettings = {}): string {
   const detail = settings.detail ?? "standard";
+  const reasoningMode = settings.reasoning ?? "collapsed";
   const parts: string[] = [];
+  const budget = 3800;
+  let used = 0;
+  const add = (section: string) => {
+    const cost = section.length + (parts.length ? 2 : 0);
+    if (used + cost > budget) return false;
+    parts.push(section);
+    used += cost;
+    return true;
+  };
+  const clean = (value: string, max: number) => escapeTelegramHtml(value.slice(0, max));
+  const safeClean = (value: string, max: number) => clean(safePreview(value, max) ?? "", max);
+  const elapsedSeconds = Number.isFinite(snapshot.updatedAt - snapshot.startedAt)
+    ? Math.max(0, Math.floor((snapshot.updatedAt - snapshot.startedAt) / 1000)) : 0;
+  const safeDuration = (ms: number) => Number.isFinite(ms) && ms >= 0 ? (ms / 1000).toFixed(1) + "s" : "0.0s";
   const expandable = (value: string) => "<blockquote expandable>" + value + "</blockquote>";
-  const clean = (value: string, max: number) => escapeTelegramHtml(value.slice(-max));
-  const reasoning = settings.reasoning ?? "collapsed";
-
-  if (reasoning !== "hidden" && (snapshot.reasoning || snapshot.earlierReasoning)) {
-    const reasoningParts: string[] = [];
-    if (snapshot.reasoning) {
-      const current = clean(snapshot.reasoning, detail === "detailed" ? 850 : detail === "minimal" ? 180 : 450);
-      reasoningParts.push(reasoning === "expanded" ? current : expandable(current));
-    }
-    if (snapshot.earlierReasoning && detail !== "minimal") {
-      reasoningParts.push("<i>Earlier reasoning · tap to expand</i>\n" + expandable(clean(snapshot.earlierReasoning, 750)));
-    }
-    parts.push("<b>Reasoning</b>\n" + reasoningParts.join("\n"));
+  const phaseStatus = snapshot.settled ? (snapshot.failedTools || snapshot.failedChildWork ? "Finished with errors" : snapshot.interruptedTools || snapshot.interruptedChildWork ? "Interrupted" : "Completed")
+    : snapshot.phase === "awaiting-input" ? "Awaiting input" : snapshot.phase === "compacting" ? "Compacting context" : "Working";
+  const tools = snapshot.tools;
+  const active = tools.filter(t => t.state === "running");
+  const hiddenActiveCount = Math.max(0, snapshot.totalTools - snapshot.completedTools - snapshot.failedTools - snapshot.interruptedTools - active.length);
+  const activeCount = Math.max(0, snapshot.totalTools - snapshot.completedTools - snapshot.failedTools - snapshot.interruptedTools);
+  const jobs = active.filter(t => t.kind === "subagent" || t.kind === "background" || t.kind === "task");
+  const activeChildren = snapshot.childWork.filter(t => t.state === "running");
+  const childActiveCount = Math.max(0, snapshot.totalChildWork - snapshot.completedChildWork - snapshot.failedChildWork - snapshot.interruptedChildWork);
+  const hiddenChildren = Math.max(0, childActiveCount - activeChildren.length);
+  const finished = tools.filter(t => t.state !== "running");
+  const line = (tool: LiveTailTool, compact = false) => {
+    const status = tool.state === "running" ? "[RUN]" : tool.state === "error" ? "[ERR]" : tool.state === "interrupted" ? "[STOP]" : "[OK]";
+    const command = tool.command ? " " + safeClean(tool.command, compact ? 90 : 160) : "";
+    const update = !compact && tool.update ? "\n" + safeClean(tool.update, 90) : "";
+    const duration = tool.elapsedMs === undefined ? "" : " (" + safeDuration(tool.elapsedMs) + ")";
+    const result = !compact && tool.state !== "running" && tool.result ? "\n" + safeClean(tool.result, 90) : "";
+    return status + " <code>" + (safeClean(tool.name, 50) || "tool") + command + "</code>" + duration + update + result;
+  };
+  if (detail === "detailed") add("<b>VENOM // LIVE TAIL</b>");
+  if (snapshot.phase === "compacting") add("<b>SESSION</b>\nCompacting context");
+  if (snapshot.phase === "awaiting-input") add("<b>AWAITING INPUT</b>\n" + (safeClean(snapshot.prompt ?? "User input", 120) || "Input requested"));
+  if (!snapshot.settled && active.length && settings.tools !== "hidden") {
+    const current = active.slice(-2);
+    add("<b>ACTIVE OPERATIONS</b>\n" + current.map(t => line(t)).join("\n") + (active.length > current.length ? "\n+" + (active.length - current.length) + " other active" : "") + (hiddenActiveCount ? "\n+" + hiddenActiveCount + " untracked in visible history" : ""));
+  } else {
+    add("<b>CURRENT STATUS</b>\n" + phaseStatus);
   }
-
+  if (settings.tools !== "hidden" && (snapshot.totalChildWork > 0)) {
+    const childStatus = "<b>CHILD WORK</b>\n" + snapshot.completedChildWork + " done / " + childActiveCount + " active" + " / " + snapshot.subagentWorkTotal + " subagents total / " + snapshot.backgroundWorkTotal + " background total" + (snapshot.failedChildWork ? " / " + snapshot.failedChildWork + " errors" : "") + (snapshot.interruptedChildWork ? " / " + snapshot.interruptedChildWork + " interrupted" : "");
+    const visibleChildren = activeChildren.slice(-3).map(t => line(t, false));
+    add(childStatus + (visibleChildren.length ? "\n" + visibleChildren.join("\n") : "") + (hiddenChildren ? "\n+" + hiddenChildren + " other active child jobs" : ""));
+  }
+  if (settings.tools !== "hidden" && settings.tools !== "active" && detail !== "minimal") {
+    const finishedChildren = snapshot.childWork.filter(t => t.state !== "running");
+    if (finishedChildren.length) {
+      const recentChildren = finishedChildren.slice(-(detail === "detailed" ? 4 : 2));
+      add("<b>RECENT CHILD WORK</b>\n" + recentChildren.map(t => line(t, detail !== "detailed")).join("\n"));
+    }
+  }
+  if (!snapshot.settled && detail !== "minimal" && settings.tools !== "hidden" && jobs.length > 2) add("<b>ONGOING TASKS</b>\n" + jobs.slice(-4).map(t => safeClean(t.name, 50) || "tool").join("\n"));
   if (detail !== "minimal" && snapshot.plan) {
-    parts.push("<b>Plan</b>\n" + clean(snapshot.plan, detail === "detailed" ? 750 : 350));
+    add("<b>CURRENT TASK</b>\n" + safeClean(snapshot.plan.slice(-200), 200));
   }
-
-  if (detail === "detailed") parts.unshift("<b>PI-BOLT // LIVE TERMINAL</b>");
-
-  if (settings.tools !== "hidden" && snapshot.tools.length) {
-    const all = snapshot.tools.filter(t => settings.tools !== "active" || t.state === "running");
-    const max = detail === "minimal" ? 1 : detail === "detailed" ? 8 : 4;
-    const selected = all.slice(-max);
-    const renderTool = (tool: LiveTailTool): string => {
-      const status = tool.state === "running" ? "…" : tool.state === "done" ? "✓" : "×";
-      const duration = tool.elapsedMs === undefined ? "" : " · " + (tool.elapsedMs / 1000).toFixed(1) + "s";
-      const command = detail === "detailed" && tool.command ? " · <code>" + clean(tool.command, 180) + "</code>" : "";
-      return status + " <code>" + clean(tool.name, 70) + "</code>" + command + duration;
-    };
-    const active = selected.filter(t => t.state === "running");
-    const finished = selected.filter(t => t.state !== "running");
-    const rows: string[] = [];
-    if (active.length) rows.push(...active.map(renderTool));
-    if (finished.length) {
-      if (detail === "detailed") {
-        rows.push("<i>Completed tools (" + finished.length + ") · tap to expand</i>\n" + expandable(finished.map(renderTool).join("\n")));
-      } else if (detail === "standard") {
-        rows.push(...finished.slice(-2).map(renderTool));
-      } else if (!active.length) {
-        rows.push(renderTool(finished[finished.length - 1]));
-      }
+  const done = snapshot.completedTools;
+  const errors = snapshot.failedTools;
+  const interrupted = snapshot.interruptedTools;
+  add("<b>STATUS</b>\n" + done + " done / " + activeCount + " active" + (errors ? " / " + errors + " errors" : "") + (interrupted ? " / " + interrupted + " interrupted" : "") + " / " + elapsedSeconds + "s");
+  if (settings.tools !== "hidden" && settings.tools !== "active" && finished.length) {
+    const recent = finished.slice(-(detail === "detailed" ? 5 : 2));
+    add("<b>RECENT OPERATIONS</b>\n" + recent.map(t => line(t, detail !== "detailed")).join("\n"));
+    if (detail === "detailed" && finished.length > 2) {
+      const history = finished.slice(-17, -5);
+      if (history.length) add("<i>Earlier operations (" + history.length + ")</i>\n" + expandable(history.map(t => line(t, true)).join("\n")));
     }
-    if (rows.length) parts.push("<b>Tools</b>\n" + rows.join("\n"));
   }
-
-  const running = snapshot.tools.filter(t => t.state === "running").length;
-  const completed = snapshot.tools.filter(t => t.state === "done").length;
-  const failed = snapshot.tools.filter(t => t.state === "error").length;
-  const status = snapshot.settled ? "Completed" : running ? "Running " + running + " tool" + (running === 1 ? "" : "s") : "Working";
-  const counters = detail === "detailed" ? "\nTools: " + completed + " done" + (failed ? " · " + failed + " failed" : "") + " · " + running + " active" : "";
-  parts.push("<b>Status</b>\n" + status + counters);
-  return parts.join("\n\n").slice(0, 3900);
+  if (reasoningMode !== "hidden" && snapshot.reasoning && detail !== "minimal") {
+    const summary = safeClean(snapshot.reasoning.slice(-240), 240);
+    add("<b>REASONING</b>\n" + (reasoningMode === "expanded" ? summary : expandable(summary)));
+  }
+  if (reasoningMode !== "hidden" && detail === "detailed" && snapshot.earlierReasoning) {
+    add("<i>Earlier reasoning</i>\n" + expandable(safeClean(snapshot.earlierReasoning.slice(-350), 350)));
+  }
+  return parts.join("\n\n");
 }
