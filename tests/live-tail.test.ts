@@ -1,3 +1,7 @@
+/**
+ * Regression coverage for bounded Live Tail projection and rendering.
+ * Zones: telegram, pi agent
+ */
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createLiveTailProjection, renderLiveTail } from "../lib/live-tail.ts";
