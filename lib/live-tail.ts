@@ -3,6 +3,7 @@
  *
  * This module deliberately does not send Telegram messages. The activity
  * consumer owns one send/edit handle and schedules throttled flushes.
+ * Zones: telegram, pi agent
  */
 import type { TelegramActivityEvent } from "./activity.ts";
 import type { TelegramLiveTailSettings } from "./config.ts";
