@@ -42,6 +42,7 @@ export type TelegramAssistantRenderingMode = "rich" | "html";
 export type TelegramLiveTailAutoDelete = "keep" | "immediate" | "5s" | "15s" | "30s" | "60s";
 export interface TelegramLiveTailSettings {
     enabled?: boolean;
+    style?: "bbs" | "tactical" | "categorized" | "hermes";
     detail?: "minimal" | "standard" | "detailed";
     reasoning?: "hidden" | "collapsed" | "expanded";
     tools?: "hidden" | "active" | "recent";
@@ -188,6 +189,7 @@ export declare function createTelegramProactivePushTargetGetter(deps: {
 export declare function createTelegramConfigControls(configStore: TelegramMutableConfigStore): {
     getLiveTailSettings: () => {
         enabled?: boolean;
+        style?: "bbs" | "tactical" | "categorized" | "hermes";
         detail?: "minimal" | "standard" | "detailed";
         reasoning?: "hidden" | "collapsed" | "expanded";
         tools?: "hidden" | "active" | "recent";

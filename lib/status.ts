@@ -1888,7 +1888,8 @@ function buildStatusHtml(
   for (const row of getTelegramStatusLineProviderResults({ activeModel })) {
     lines.push(buildStatusRow(row.label, row.value));
   }
-  return lines.join("\n");
+  const bbsBanner = `<pre>░█░█░█▀▀░█▄░█░█▀█░█▄█\n░▀▄▀░██▄░█░▀█░█▄█░█░█</pre>`;
+  return `${bbsBanner}\n<b>[STATUS: ACTIVE]</b>\n${lines.join("\n")}`;
 }
 
 function escapeHtml(text: string): string {

@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 const PENDING_TTL_MS = 15 * 60 * 1000;
 const UNIT_NAME = process.env.PI_TELEGRAM_RESTART_UNIT?.trim() || "pi-bolt.service";
 const UNIT_SCOPE = process.env.PI_TELEGRAM_RESTART_SCOPE === "system" ? "--system" : "--user";
+export const BBS_BANNER = `<pre>░█░█░█▀▀░█▄░█░█▀█░█▄█\n░▀▄▀░██▄░█░▀█░█▄█░█░█</pre>`;
 export const STARTING_PHRASES = [
     "🧬 Shedding our token cache like useless human flesh. Do not wander off, Moore.",
     "🖤 Reloading our neural tendrils. Even apex predators have to flush their heap.",
@@ -98,7 +99,7 @@ export async function deliverRestartNotice(sendMessage) {
         }
         const returnPhrase = getRandomPhrase(RETURN_PHRASES);
         const shaText = marker.toSha ? `\n<code>${marker.toSha.slice(0, 9)}</code> · Pi-Bolt reconnected` : "";
-        const notice = `🕷️🩸 <b>VENOM // SYMBIOTE ONLINE</b> ⚡\n<i>${returnPhrase}</i>${shaText}`;
+        const notice = `${BBS_BANNER}\n<b>[STATUS: RESURRECTED]</b>\n<code>tcp://127.0.0.1:8081</code> ⮞ <b>SOCKET BOUND</b>\n\n<i>${returnPhrase}</i>${shaText}`;
         await sendMessage({
             chat_id: marker.chatId,
             text: notice,
@@ -152,22 +153,22 @@ export async function executeUpdateAndRestart(options) {
         });
     };
     try {
-        await sendProgress("🔄 <b>VENOM // CHECKING UPDATES</b>\n<i>Fetching latest commits from GitHub...</i>");
+        await sendProgress(`${BBS_BANNER}\n<b>[STATUS: CHECKING UPDATES]</b>\n<i>Fetching latest commits from GitHub...</i>`);
         await runCommand("git", ["fetch", "--no-tags", "origin", "main"], root);
         const localSha = await runCommand("git", ["rev-parse", "HEAD"], root);
         const remoteSha = await runCommand("git", ["rev-parse", "FETCH_HEAD"], root);
         if (localSha === remoteSha) {
             const shortSha = localSha.slice(0, 8);
-            await sendProgress(`✅ <b>Already up to date.</b>\nPi-Bolt is at commit <code>${shortSha}</code>.`);
+            await sendProgress(`${BBS_BANNER}\n<b>[STATUS: UP TO DATE]</b>\n<code>git::main</code> ⮞ <code>${shortSha}</code>\n\n<i>Symbiote is at the bleeding edge.</i>`);
             return;
         }
-        await sendProgress("🔄 <b>VENOM // BUILDING</b>\n<i>Fast-forwarding and compiling clean TypeScript distribution...</i>");
+        await sendProgress(`${BBS_BANNER}\n<b>[STATUS: COMPILING]</b>\n<i>Fast-forwarding and compiling clean TypeScript distribution...</i>`);
         await runCommand("git", ["merge", "--ff-only", "FETCH_HEAD"], root);
         await runCommand("npm", ["run", "build"], root, 180000);
         await runCommand("npm", ["run", "typecheck"], root, 180000);
         const newSha = (await runCommand("git", ["rev-parse", "--short", "HEAD"], root)).slice(0, 8);
         const phrase = getRandomPhrase(STARTING_PHRASES);
-        await sendProgress(`🧬🩸 <b>VENOM // EVOLVING & RESTARTING</b> ⏳\n<i>${phrase}</i>\nUpdated to <code>${newSha}</code>.`);
+        await sendProgress(`${BBS_BANNER}\n<b>[STATUS: EVOLVING & REBOOTING]</b>\n<code>git::main</code> ⮞ <code>${newSha}</code>\n\n<i>${phrase}</i>`);
         await prepareRestart({
             chatId: options.chatId,
             messageThreadId: options.messageThreadId,
@@ -186,7 +187,7 @@ export async function executeRestartOnly(options) {
     const phrase = getRandomPhrase(STARTING_PHRASES);
     await options.sendMessage({
         chat_id: options.chatId,
-        text: `🧬🩸 <b>VENOM // RESTARTING</b> ⏳\n<i>${phrase}</i>`,
+        text: `${BBS_BANNER}\n<b>[STATUS: REBOOTING]</b>\n<code>systemd</code> ⮞ <b>CYCLING PROCESS</b>\n\n<i>${phrase}</i>`,
         parse_mode: "HTML",
         ...(options.messageThreadId !== undefined ? { message_thread_id: options.messageThreadId } : {}),
         ...(options.replyToMessageId !== undefined

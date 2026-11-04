@@ -361,7 +361,7 @@ async function updateAssistantRenderingSettingsMessage(deps) {
 }
 function liveTailSettingsMarkup(settings) {
     const enabled = settings.enabled !== false;
-    const style = settings.style ?? "hermes";
+    const style = settings.style ?? "bbs";
     const detail = settings.detail ?? "standard";
     const reasoning = settings.reasoning ?? "collapsed";
     const tools = settings.tools ?? "recent";
@@ -391,7 +391,7 @@ function liveTailSettingsMarkup(settings) {
     return { inline_keyboard: rows };
 }
 const LIVE_TAIL_CHOICES = {
-    style: { title: "Style", icon: "🎨", values: ["hermes", "terminal", "accent", "minimal"] },
+    style: { title: "Style", icon: "🎨", values: ["bbs", "tactical", "categorized", "hermes"] },
     detail: { title: "Detail", icon: "📊", values: ["minimal", "standard", "detailed"] },
     reasoning: { title: "Reasoning", icon: "🧠", values: ["hidden", "collapsed", "expanded"] },
     tools: { title: "Tools", icon: "🛠", values: ["hidden", "active", "recent"] },
@@ -400,7 +400,7 @@ const LIVE_TAIL_CHOICES = {
 };
 function liveTailChoiceMarkup(key, settings) {
     const choice = LIVE_TAIL_CHOICES[key];
-    const current = key === "style" ? settings.style ?? "hermes"
+    const current = key === "style" ? settings.style ?? "bbs"
         : key === "interval" ? String(settings.interval ?? 2)
             : key === "autoDelete" ? settings.autoDelete ?? "keep"
                 : key === "detail" ? settings.detail ?? "standard"
@@ -540,7 +540,9 @@ export async function handleTelegramSettingsMenuCallbackAction(callbackQueryId, 
     if (data.startsWith("settings:live-tail:")) {
         const [, , key, value] = data.split(":");
         const allowed = {
-            enabled: ["on", "off"], detail: ["minimal", "standard", "detailed"],
+            enabled: ["on", "off"],
+            style: ["bbs", "tactical", "categorized", "hermes"],
+            detail: ["minimal", "standard", "detailed"],
             reasoning: ["hidden", "collapsed", "expanded"], tools: ["hidden", "active", "recent"],
             interval: ["1", "2", "3"], autoDelete: ["keep", "immediate", "5s", "15s", "30s", "60s"],
         };
