@@ -54,7 +54,7 @@ import {
 } from "./updates.ts";
 
 export type TelegramHeldCommandName =
-  "status" | "start" | "help" | "abort" | "stop" | "next" | "continue";
+  "status" | "start" | "help" | "abort" | "stop" | "next" | "continue" | "restart" | "update";
 
 /** Commands-owned no-fold admission over the ordinary recipient queue; source reporting stays separate from removal. */
 export interface TelegramHeldTurnAdmission {
@@ -987,6 +987,8 @@ export const TELEGRAM_RESERVED_COMMAND_NAMES = [
   "settings",
   "help",
   "start",
+  "restart",
+  "update",
 ] as const;
 
 export type TelegramReservedCommandName =
@@ -1019,6 +1021,8 @@ export type TelegramCommandAction =
   | { kind: "model"; executionMode: "immediate" }
   | { kind: "thinking"; executionMode: "immediate" }
   | { kind: "settings"; executionMode: "immediate" }
+  | { kind: "restart"; executionMode: "immediate" }
+  | { kind: "update"; executionMode: "immediate" }
   | {
       kind: "help";
       commandName: "help" | "start";
@@ -1038,6 +1042,8 @@ export interface TelegramCommandActionDeps<TMessage, TContext> {
   handleModel: (message: TMessage, ctx: TContext) => Promise<void>;
   handleThinking: (message: TMessage, ctx: TContext) => Promise<void>;
   handleSettings?: (message: TMessage, ctx: TContext) => Promise<void>;
+  handleRestart?: (message: TMessage, ctx: TContext) => Promise<void>;
+  handleUpdate?: (message: TMessage, ctx: TContext) => Promise<void>;
   handleHelp: (
     message: TMessage,
     commandName: "help" | "start",
@@ -1741,6 +1747,8 @@ export const TELEGRAM_COMMAND_ACTIONS = {
   model: { kind: "model", executionMode: "immediate" },
   thinking: { kind: "thinking", executionMode: "immediate" },
   settings: { kind: "settings", executionMode: "immediate" },
+  restart: { kind: "restart", executionMode: "immediate" },
+  update: { kind: "update", executionMode: "immediate" },
   help: { kind: "help", commandName: "help", executionMode: "immediate" },
   start: { kind: "help", commandName: "start", executionMode: "immediate" },
 } as const satisfies Record<TelegramReservedCommandName, TelegramCommandAction>;
@@ -2213,6 +2221,14 @@ export async function executeTelegramCommandAction<TMessage, TContext>(
     case "settings":
       if (!deps.handleSettings) return false;
       await deps.handleSettings(message, ctx);
+      return true;
+    case "restart":
+      if (!deps.handleRestart) return false;
+      await deps.handleRestart(message, ctx);
+      return true;
+    case "update":
+      if (!deps.handleUpdate) return false;
+      await deps.handleUpdate(message, ctx);
       return true;
     case "help":
       await deps.handleHelp(message, action.commandName, ctx);
@@ -2867,6 +2883,8 @@ export function createTelegramCommandHandler<
     status: heldMenuPlan,
     start: heldMenuPlan,
     help: heldMenuPlan,
+    restart: heldMenuPlan,
+    update: heldMenuPlan,
     abort: {
       completion: "after-semantics",
       effect: "sendTextReply",
@@ -4191,6 +4209,30 @@ async function handleTelegramCommandRuntime<
           commandCtx,
           deps,
         );
+      },
+      handleRestart: async (nextMessage) => {
+        const { executeRestartOnly } = await import("./maintenance.ts");
+        const msg = nextMessage as any;
+        await executeRestartOnly({
+          chatId: msg.chat.id,
+          messageThreadId: msg.message_thread_id,
+          replyToMessageId: msg.message_id,
+          sendMessage: async (body: any) => {
+            await sendReplyFor(nextMessage)(body.text, { parseMode: "HTML" });
+          },
+        });
+      },
+      handleUpdate: async (nextMessage) => {
+        const { executeUpdateAndRestart } = await import("./maintenance.ts");
+        const msg = nextMessage as any;
+        await executeUpdateAndRestart({
+          chatId: msg.chat.id,
+          messageThreadId: msg.message_thread_id,
+          replyToMessageId: msg.message_id,
+          sendMessage: async (body: any) => {
+            await sendReplyFor(nextMessage)(body.text, { parseMode: "HTML" });
+          },
+        });
       },
     },
     commandArgs,

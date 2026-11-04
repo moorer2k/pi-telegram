@@ -1,3 +1,4 @@
+import { deliverRestartNotice } from "./maintenance.ts";
 /**
  * Telegram bridge extension composition and orchestration layer
  * Zones: telegram, pi agent, orchestration
@@ -3122,6 +3123,7 @@ export default function (pi: Pi.ExtensionAPI) {
         model: currentModelRuntime.getStored()?.id ?? currentModelRuntime.getStored()?.name ?? "rvn-q4-km-mtp",
       } as any));
       sessionActionAssembly.settlement.onSessionStart(ctx);
+      void deliverRestartNotice(sendMessage);
     },
     buttonActionStore,
     callMultipart,

@@ -14,7 +14,7 @@ import { type TelegramApiCallOptions } from "./telegram-api.ts";
 import type { TelegramTarget } from "./target.ts";
 import type { TelegramSessionReplacementIntent } from "./threads.ts";
 import { type TelegramDeferredSourceEvidence, type TelegramLiveSourceCompletionReadiness, type TelegramQueueAdmissionReceiptLike } from "./updates.ts";
-export type TelegramHeldCommandName = "status" | "start" | "help" | "abort" | "stop" | "next" | "continue";
+export type TelegramHeldCommandName = "status" | "start" | "help" | "abort" | "stop" | "next" | "continue" | "restart" | "update";
 /** Commands-owned no-fold admission over the ordinary recipient queue; source reporting stays separate from removal. */
 export interface TelegramHeldTurnAdmission {
     assertCurrent(): void;
@@ -217,7 +217,7 @@ export declare function createTelegramThreadDisplayNameRenameBinding(): {
     rename: TelegramThreadDisplayNameRenamePort;
 };
 export declare function registerTelegramBridgeCommands(pi: ExtensionAPI, deps: TelegramBridgeCommandRegistrationDeps): void;
-export declare const TELEGRAM_RESERVED_COMMAND_NAMES: readonly ["stop", "name", "new", "abort", "next", "continue", "status", "queue", "compact", "model", "thinking", "settings", "help", "start"];
+export declare const TELEGRAM_RESERVED_COMMAND_NAMES: readonly ["stop", "name", "new", "abort", "next", "continue", "status", "queue", "compact", "model", "thinking", "settings", "help", "start", "restart", "update"];
 export type TelegramReservedCommandName = (typeof TELEGRAM_RESERVED_COMMAND_NAMES)[number];
 export declare function isTelegramReservedCommandName(commandName: string | undefined): commandName is TelegramReservedCommandName;
 export type TelegramCommandAction = {
@@ -260,6 +260,12 @@ export type TelegramCommandAction = {
     kind: "settings";
     executionMode: "immediate";
 } | {
+    kind: "restart";
+    executionMode: "immediate";
+} | {
+    kind: "update";
+    executionMode: "immediate";
+} | {
     kind: "help";
     commandName: "help" | "start";
     executionMode: "immediate";
@@ -277,6 +283,8 @@ export interface TelegramCommandActionDeps<TMessage, TContext> {
     handleModel: (message: TMessage, ctx: TContext) => Promise<void>;
     handleThinking: (message: TMessage, ctx: TContext) => Promise<void>;
     handleSettings?: (message: TMessage, ctx: TContext) => Promise<void>;
+    handleRestart?: (message: TMessage, ctx: TContext) => Promise<void>;
+    handleUpdate?: (message: TMessage, ctx: TContext) => Promise<void>;
     handleHelp: (message: TMessage, commandName: "help" | "start", ctx: TContext) => Promise<void>;
 }
 export interface TelegramStopCommandDeps {
@@ -559,6 +567,14 @@ export declare const TELEGRAM_COMMAND_ACTIONS: {
     };
     readonly settings: {
         readonly kind: "settings";
+        readonly executionMode: "immediate";
+    };
+    readonly restart: {
+        readonly kind: "restart";
+        readonly executionMode: "immediate";
+    };
+    readonly update: {
+        readonly kind: "update";
         readonly executionMode: "immediate";
     };
     readonly help: {

@@ -592,6 +592,8 @@ export const TELEGRAM_RESERVED_COMMAND_NAMES = [
     "settings",
     "help",
     "start",
+    "restart",
+    "update",
 ];
 const TELEGRAM_RESERVED_COMMAND_NAME_SET = new Set(TELEGRAM_RESERVED_COMMAND_NAMES);
 export function isTelegramReservedCommandName(commandName) {
@@ -806,6 +808,8 @@ export const TELEGRAM_COMMAND_ACTIONS = {
     model: { kind: "model", executionMode: "immediate" },
     thinking: { kind: "thinking", executionMode: "immediate" },
     settings: { kind: "settings", executionMode: "immediate" },
+    restart: { kind: "restart", executionMode: "immediate" },
+    update: { kind: "update", executionMode: "immediate" },
     help: { kind: "help", commandName: "help", executionMode: "immediate" },
     start: { kind: "help", commandName: "start", executionMode: "immediate" },
 };
@@ -1075,6 +1079,16 @@ export async function executeTelegramCommandAction(action, message, ctx, deps, c
             if (!deps.handleSettings)
                 return false;
             await deps.handleSettings(message, ctx);
+            return true;
+        case "restart":
+            if (!deps.handleRestart)
+                return false;
+            await deps.handleRestart(message, ctx);
+            return true;
+        case "update":
+            if (!deps.handleUpdate)
+                return false;
+            await deps.handleUpdate(message, ctx);
             return true;
         case "help":
             await deps.handleHelp(message, action.commandName, ctx);
@@ -1509,6 +1523,8 @@ export function createTelegramCommandHandler(deps) {
         status: heldMenuPlan,
         start: heldMenuPlan,
         help: heldMenuPlan,
+        restart: heldMenuPlan,
+        update: heldMenuPlan,
         abort: {
             completion: "after-semantics",
             effect: "sendTextReply",
@@ -2423,6 +2439,30 @@ async function handleTelegramCommandRuntime(commandName, message, ctx, deps, com
             : undefined,
         handleHelp: async (nextMessage, nextCommandName, commandCtx) => {
             await handleTelegramHelpCommand(nextCommandName, nextMessage, commandCtx, deps);
+        },
+        handleRestart: async (nextMessage) => {
+            const { executeRestartOnly } = await import("./maintenance.js");
+            const msg = nextMessage;
+            await executeRestartOnly({
+                chatId: msg.chat.id,
+                messageThreadId: msg.message_thread_id,
+                replyToMessageId: msg.message_id,
+                sendMessage: async (body) => {
+                    await sendReplyFor(nextMessage)(body.text, { parseMode: "HTML" });
+                },
+            });
+        },
+        handleUpdate: async (nextMessage) => {
+            const { executeUpdateAndRestart } = await import("./maintenance.js");
+            const msg = nextMessage;
+            await executeUpdateAndRestart({
+                chatId: msg.chat.id,
+                messageThreadId: msg.message_thread_id,
+                replyToMessageId: msg.message_id,
+                sendMessage: async (body) => {
+                    await sendReplyFor(nextMessage)(body.text, { parseMode: "HTML" });
+                },
+            });
         },
     }, commandArgs);
 }
