@@ -1,4 +1,4 @@
-import { deliverRestartNotice } from "./maintenance.ts";
+import { deliverRestartNotice, startRestartNoticeDeliveryLoop } from "./maintenance.ts";
 /**
  * Telegram bridge extension composition and orchestration layer
  * Zones: telegram, pi agent, orchestration
@@ -859,6 +859,8 @@ export default function (pi: Pi.ExtensionAPI) {
     deleteMessage: deleteTelegramMessage,
     prepareTempDir,
   } = telegramApiRuntime;
+
+  startRestartNoticeDeliveryLoop(sendMessage);
 
   // --- Message Delivery ---
 
@@ -2507,6 +2509,7 @@ export default function (pi: Pi.ExtensionAPI) {
       modelContextAvailabilityRuntime.reconcile();
       const ctx = telegramSessionContextStore.get();
       if (ctx) queueHandoffReconciliationBinding.request(ctx);
+      startRestartNoticeDeliveryLoop(sendMessage);
     },
     updateStatus,
     recordRuntimeEvent,

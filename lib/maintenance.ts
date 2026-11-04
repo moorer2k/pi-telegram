@@ -128,11 +128,32 @@ export async function deliverRestartNotice(
     await unlink(markerFile).catch(() => {});
     return true;
   } catch (err: any) {
-    if (err?.code !== "ENOENT") {
-      await unlink(markerFile).catch(() => {});
+    if (err?.code === "ENOENT") {
+      return false;
     }
+    // Network / transport error: keep marker so delivery loop retries!
     return false;
   }
+}
+
+let loopActive = false;
+export function startRestartNoticeDeliveryLoop(sendMessage: (body: any) => Promise<any>): void {
+  if (loopActive) return;
+  loopActive = true;
+  let attempts = 0;
+  const maxAttempts = 20;
+
+  const check = async () => {
+    attempts++;
+    const delivered = await deliverRestartNotice(sendMessage);
+    if (!delivered && attempts < maxAttempts) {
+      setTimeout(check, 2000);
+    } else {
+      loopActive = false;
+    }
+  };
+
+  setTimeout(check, 1000);
 }
 
 export async function executeUpdateAndRestart(options: {

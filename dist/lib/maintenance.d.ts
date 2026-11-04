@@ -15,6 +15,7 @@ export declare function getRestartMarkerPath(): string;
 export declare function scheduleSystemdRestart(delayMs?: number): void;
 export declare function prepareRestart(marker: Omit<RestartMarker, "createdAt" | "previousPid">): Promise<void>;
 export declare function deliverRestartNotice(sendMessage: (body: any) => Promise<any>): Promise<boolean>;
+export declare function startRestartNoticeDeliveryLoop(sendMessage: (body: any) => Promise<any>): void;
 export declare function executeUpdateAndRestart(options: {
     chatId: number;
     messageThreadId?: number;

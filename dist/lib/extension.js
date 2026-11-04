@@ -1,4 +1,4 @@
-import { deliverRestartNotice } from "./maintenance.js";
+import { deliverRestartNotice, startRestartNoticeDeliveryLoop } from "./maintenance.js";
 /**
  * Telegram bridge extension composition and orchestration layer
  * Zones: telegram, pi agent, orchestration
@@ -665,6 +665,7 @@ export default function (pi) {
         callFollowerApi: telegramBusFollowerClients.callApi,
     });
     const { call: callTelegramApi, callMultipart, deleteWebhook, getUpdates, setMyCommands, sendTypingAction, sendChatAction, sendRecordVoiceAction, sendMessageDraft, sendMessage, sendRichMessage, sendRichMessageDraft, downloadFile: downloadTelegramBridgeFile, editMessageText: editTelegramMessageText, editMessageReplyMarkup: editTelegramMessageReplyMarkup, answerCallbackQuery, answerGuestQuery, deleteMessage: deleteTelegramMessage, prepareTempDir, } = telegramApiRuntime;
+    startRestartNoticeDeliveryLoop(sendMessage);
     // --- Message Delivery ---
     const sendGuestReply = Replies.createGuestMarkdownReplySender({
         answerGuestQuery,
@@ -2015,6 +2016,7 @@ export default function (pi) {
             const ctx = telegramSessionContextStore.get();
             if (ctx)
                 queueHandoffReconciliationBinding.request(ctx);
+            startRestartNoticeDeliveryLoop(sendMessage);
         },
         updateStatus,
         recordRuntimeEvent,

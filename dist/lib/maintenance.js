@@ -102,11 +102,31 @@ export async function deliverRestartNotice(sendMessage) {
         return true;
     }
     catch (err) {
-        if (err?.code !== "ENOENT") {
-            await unlink(markerFile).catch(() => { });
+        if (err?.code === "ENOENT") {
+            return false;
         }
+        // Network / transport error: keep marker so delivery loop retries!
         return false;
     }
+}
+let loopActive = false;
+export function startRestartNoticeDeliveryLoop(sendMessage) {
+    if (loopActive)
+        return;
+    loopActive = true;
+    let attempts = 0;
+    const maxAttempts = 20;
+    const check = async () => {
+        attempts++;
+        const delivered = await deliverRestartNotice(sendMessage);
+        if (!delivered && attempts < maxAttempts) {
+            setTimeout(check, 2000);
+        }
+        else {
+            loopActive = false;
+        }
+    };
+    setTimeout(check, 1000);
 }
 export async function executeUpdateAndRestart(options) {
     const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
