@@ -138,6 +138,9 @@ export declare const TELEGRAM_COMMAND_EMOJI: {
     readonly stop: "🟥";
     readonly name: "🏷️";
     readonly new: "🆕";
+    readonly settings: "⚙️";
+    readonly restart: "🔄";
+    readonly update: "⚡";
 };
 export type TelegramCommandEmojiName = keyof typeof TELEGRAM_COMMAND_EMOJI;
 export declare function formatTelegramCommandEmojiPrefix(command: TelegramCommandEmojiName): string;

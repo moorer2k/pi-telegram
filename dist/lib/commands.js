@@ -186,6 +186,9 @@ export const TELEGRAM_COMMAND_EMOJI = {
     stop: "🟥",
     name: "🏷️",
     new: "🆕",
+    settings: "⚙️",
+    restart: "🔄",
+    update: "⚡",
 };
 function getTelegramCommandEmoji(command) {
     return TELEGRAM_COMMAND_EMOJI[command];
@@ -253,6 +256,30 @@ const TELEGRAM_BUILTIN_BOT_COMMANDS = [
     {
         command: "stop",
         description: formatTelegramBotCommandDescription("stop", "Abort Pi & Clear queue"),
+    },
+    {
+        command: "status",
+        description: formatTelegramBotCommandDescription("status", "Show agent status"),
+    },
+    {
+        command: "model",
+        description: formatTelegramBotCommandDescription("model", "Switch LLM model"),
+    },
+    {
+        command: "thinking",
+        description: formatTelegramBotCommandDescription("thinking", "Configure reasoning level"),
+    },
+    {
+        command: "settings",
+        description: formatTelegramBotCommandDescription("settings", "Configure live tail & preferences"),
+    },
+    {
+        command: "restart",
+        description: formatTelegramBotCommandDescription("restart", "Restart Pi-Bolt service"),
+    },
+    {
+        command: "update",
+        description: formatTelegramBotCommandDescription("update", "Update from GitHub & restart"),
     },
 ];
 export const TELEGRAM_BOT_COMMANDS = TELEGRAM_BUILTIN_BOT_COMMANDS;

@@ -400,6 +400,9 @@ export const TELEGRAM_COMMAND_EMOJI = {
   stop: "🟥",
   name: "🏷️",
   new: "🆕",
+  settings: "⚙️",
+  restart: "🔄",
+  update: "⚡",
 } as const;
 
 export type TelegramCommandEmojiName = keyof typeof TELEGRAM_COMMAND_EMOJI;
@@ -517,6 +520,48 @@ const TELEGRAM_BUILTIN_BOT_COMMANDS: readonly TelegramBotCommandDefinition[] = [
     description: formatTelegramBotCommandDescription(
       "stop",
       "Abort Pi & Clear queue",
+    ),
+  },
+  {
+    command: "status",
+    description: formatTelegramBotCommandDescription(
+      "status",
+      "Show agent status",
+    ),
+  },
+  {
+    command: "model",
+    description: formatTelegramBotCommandDescription(
+      "model",
+      "Switch LLM model",
+    ),
+  },
+  {
+    command: "thinking",
+    description: formatTelegramBotCommandDescription(
+      "thinking",
+      "Configure reasoning level",
+    ),
+  },
+  {
+    command: "settings",
+    description: formatTelegramBotCommandDescription(
+      "settings",
+      "Configure live tail & preferences",
+    ),
+  },
+  {
+    command: "restart",
+    description: formatTelegramBotCommandDescription(
+      "restart",
+      "Restart Pi-Bolt service",
+    ),
+  },
+  {
+    command: "update",
+    description: formatTelegramBotCommandDescription(
+      "update",
+      "Update from GitHub & restart",
     ),
   },
 ];
