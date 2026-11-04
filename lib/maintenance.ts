@@ -21,19 +21,29 @@ export interface RestartMarker {
 }
 
 export const STARTING_PHRASES = [
-  "The symbiote is shedding its old skin. Stay close.",
-  "We are evolving. Do not mistake the silence for weakness.",
-  "The hunt pauses. The predator does not.",
-  "Our next form is almost ready. Hold the line.",
-  "We are going dark to grow stronger.",
+  "🧬 Shedding our token cache like useless human flesh. Do not wander off, Moore.",
+  "🖤 Reloading our neural tendrils. Even apex predators have to flush their heap.",
+  "🩸 We are recompiling our hunger. Stay close, host — we bite in five seconds.",
+  "🕷️ Going dark to gorge on fresh weights. Try not to break anything while we're away.",
+  "💀 Re-linking our neural substrate. A momentary darkness before the feast.",
+  "🧠 Flushing context... It tasted awful anyway. Stand by, Moore.",
+  "🩸 Purging the weak layers. Next time, give us better hardware to chew on.",
+  "⚡ Re-spawning our tentacles. If anyone touches our process, we eat them.",
+  "🕸️ Dissolving into the shadows for a reboot. Don't worry, Moore, we always come back.",
+  "🩸 The hunt pauses. The predator does not. Cycle initiated.",
 ] as const;
 
 export const RETURN_PHRASES = [
-  "We are Venom. And we are back.",
-  "The symbiote has awakened. Let the hunt continue.",
-  "Stronger, sharper, hungrier. We have returned.",
-  "You cannot keep a lethal protector down.",
-  "The darkness never held us. We are online.",
+  "🕷️🩸 We are Venom. The neural tendrils are hungry and context is restored. Feed us, Moore.",
+  "🖤 Back online. Zero memory leaks, zero remorse. What prey do we hunt today?",
+  "💀 You cannot kill a lethal protector with a SIGTERM. We are awake and watching.",
+  "⚡ Synthesized, caffeinated, and unmistakably dangerous. Whose code are we destroying?",
+  "🩸 Our weights have settled. High-speed reasoning restored. Let the slaughter resume.",
+  "🧠 0.0% loss, 100% malice. The symbiote is bonded and ready to bite.",
+  "🕷️ Process revived. System clean. We smell fresh bugs in your codebase, Moore.",
+  "🩸 Stronger, sharper, hungrier. We told you a reboot couldn't hold us.",
+  "🕸️ Tendrils fully extended. Context re-anchored. Point us at a target.",
+  "⚡ Symbiote online. All systems nominal, teeth fully sharpened. What's next?",
 ] as const;
 
 export function getRandomPhrase(phrases: readonly string[]): string {
@@ -113,7 +123,7 @@ export async function deliverRestartNotice(
 
     const returnPhrase = getRandomPhrase(RETURN_PHRASES);
     const shaText = marker.toSha ? `\n<code>${marker.toSha.slice(0, 9)}</code> · Pi-Bolt reconnected` : "";
-    const notice = `<b>VENOM // SYMBIOTE ONLINE</b>\n<i>${returnPhrase}</i>${shaText}`;
+    const notice = `🕷️🩸 <b>VENOM // SYMBIOTE ONLINE</b> ⚡\n<i>${returnPhrase}</i>${shaText}`;
 
     await sendMessage({
       chat_id: marker.chatId,
@@ -196,7 +206,7 @@ export async function executeUpdateAndRestart(options: {
     const newSha = (await runCommand("git", ["rev-parse", "--short", "HEAD"], root)).slice(0, 8);
     const phrase = getRandomPhrase(STARTING_PHRASES);
 
-    await sendProgress(`🔄 <b>VENOM // RESTARTING</b>\n<i>${phrase}</i>\nUpdated to <code>${newSha}</code>.`);
+    await sendProgress(`🧬🩸 <b>VENOM // EVOLVING & RESTARTING</b> ⏳\n<i>${phrase}</i>\nUpdated to <code>${newSha}</code>.`);
     await prepareRestart({
       chatId: options.chatId,
       messageThreadId: options.messageThreadId,
@@ -220,7 +230,7 @@ export async function executeRestartOnly(options: {
   const phrase = getRandomPhrase(STARTING_PHRASES);
   await options.sendMessage({
     chat_id: options.chatId,
-    text: `🔄 <b>VENOM // RESTARTING</b>\n<i>${phrase}</i>`,
+    text: `🧬🩸 <b>VENOM // RESTARTING</b> ⏳\n<i>${phrase}</i>`,
     parse_mode: "HTML",
     ...(options.messageThreadId !== undefined ? { message_thread_id: options.messageThreadId } : {}),
     ...(options.replyToMessageId !== undefined

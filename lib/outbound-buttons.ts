@@ -390,22 +390,11 @@ export async function handleTelegramButtonCallbackQuery<TContext = unknown>(
     try {
       const viewMode = await deps.invokeBoundAction(query, action, ctx);
       if (viewMode) {
-        if (viewMode === "new" && query.data && query.message?.reply_markup) {
-          const selectedMarkup = markTelegramButtonSelected(
-            query.message.reply_markup,
-            query.data,
-            action.selectedStyle,
-          );
-          if (selectedMarkup && deps.editMessageReplyMarkup) {
+        if (viewMode === "new") {
+          if (deps.editMessageReplyMarkup) {
             try {
-              await deps.editMessageReplyMarkup(
-                chatId,
-                messageId,
-                selectedMarkup,
-              );
-            } catch {
-              // The action already succeeded; old-surface styling is best-effort.
-            }
+              await deps.editMessageReplyMarkup(chatId, messageId, { inline_keyboard: [] });
+            } catch (_) {}
           }
         }
         await deps.answerCallbackQuery(query.id, "Done");
@@ -422,17 +411,12 @@ export async function handleTelegramButtonCallbackQuery<TContext = unknown>(
     await deps.answerCallbackQuery(query.id, "Already queued");
     return true;
   }
-  const selectedMarkup =
-    query.data && query.message?.reply_markup
-      ? markTelegramButtonSelected(
-          query.message.reply_markup,
-          query.data,
-          action.selectedStyle,
-        )
-      : undefined;
-  if (selectedMarkup && deps.editMessageReplyMarkup) {
-    await deps.editMessageReplyMarkup(chatId, messageId, selectedMarkup);
+  // User selected an option: close/remove the inline keyboard so the menu cleanly disappears
+  if (deps.editMessageReplyMarkup) {
+    try {
+      await deps.editMessageReplyMarkup(chatId, messageId, { inline_keyboard: [] });
+    } catch (_) {}
   }
-  await deps.answerCallbackQuery(query.id, "Queued");
+  await deps.answerCallbackQuery(query.id, "Selected");
   return true;
 }
