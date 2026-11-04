@@ -116,7 +116,7 @@ export function registerLiveTailConsumer(getSettings = () => ({})) {
                 state.dirty = state.revision !== sentRevision;
                 return;
             }
-            const view = { text, parseMode: "html" };
+            const view = { text, parseMode: "rich" };
             if (!state.handle && state.initialSendAttempted) {
                 state.failed = true;
                 state.dirty = false;

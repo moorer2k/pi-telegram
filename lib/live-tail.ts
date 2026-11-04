@@ -294,18 +294,14 @@ export function escapeTelegramHtml(text: string): string {
 export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiveTailSettings = {}): string {
     const s = snapshot;
     const cfg = settings as any;
-    const style = cfg.style || "bbs";
-    const esc = (v: unknown, max: number): string => escapeTelegramHtml(String(v ?? "").slice(0, max));
-    const safeEsc = (v: unknown, max: number): string => esc(safePreview(v as string, max) ?? "", max);
 
-    // Format tool arguments according to tool type (never mutilate shell commands)
     const formatToolTarget = (toolName: string, raw: unknown): string => {
         const text = String(raw ?? "").trim();
         if (!text) return "";
         const isShell = /bash|terminal|exec|shell|sh/i.test(toolName);
         if (isShell) {
             const clean = text.replace(/\s+/g, " ");
-            return clean.length > 105 ? clean.slice(0, 102) + "…" : clean;
+            return clean.length > 100 ? clean.slice(0, 97) + "…" : clean;
         }
         const isFile = /read|write|edit|patch/i.test(toolName);
         if (isFile && /[/\\]/.test(text)) {
@@ -313,7 +309,7 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
             return parts.length <= 2 ? parts.join("/") : "…/" + parts.slice(-2).join("/");
         }
         const clean = text.replace(/\s+/g, " ");
-        return clean.length > 90 ? clean.slice(0, 87) + "…" : clean;
+        return clean.length > 85 ? clean.slice(0, 82) + "…" : clean;
     };
 
     const tools: LiveTailTool[] = Array.isArray(s.tools) ? s.tools : [];
@@ -328,9 +324,9 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
     }
     const rows: LiveTailRow[] = [];
     for (const t of [...finished, ...active]) {
-        const name = safeEsc(t.name, 32) || "tool";
+        const name = String(t.name ?? "tool").trim() || "tool";
         const rawTarget = t.command ?? t.update ?? "";
-        const target = safeEsc(formatToolTarget(t.name, rawTarget), 110);
+        const target = formatToolTarget(t.name, rawTarget);
         const last: LiveTailRow | undefined = rows[rows.length - 1];
         if (last && last.name === name && last.target === target && last.state === t.state) {
             last.count += 1;
@@ -367,241 +363,96 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
     const activeRow = rows.filter(r => r.state === "running").pop();
     const finishedRows = rows.filter(r => r.state !== "running");
 
-    // ─────────────────────────────────────────────────────────────
-    // PRESET 1: BBS Console Matrix + Dual Dropdowns
-    // ─────────────────────────────────────────────────────────────
-    if (style === "bbs") {
-        const parts: string[] = [];
-        parts.push(`<pre>░█░█░█▀▀░█▄░█░█▀█░█▄█\n░▀▄▀░██▄░█░▀█░█▄█░█░█</pre>`);
-
-        if (activeRow) {
-            const dur = activeRow.ms !== undefined && activeRow.ms >= 100 ? ` (${(activeRow.ms / 1000).toFixed(1)}s)` : "";
-            parts.push(`<b>[EXE: ${activeRow.name}]</b> <code>${activeRow.target || "executing"}</code><i>${dur}</i>`);
-        } else if (!s.settled) {
-            parts.push(`<b>[STATUS: THINKING]</b> <i>Synthesizing next action...</i>`);
-        }
-
-        const MAX_RECENT = 3;
-        const visibleFinished = finishedRows.slice(-MAX_RECENT);
-        const collapsedFinished = finishedRows.slice(0, -MAX_RECENT);
-
-        const formatBbsItem = (r: LiveTailRow): string => {
-            const mark = r.state === "error" ? "❌" : "✓";
-            const dur = r.ms !== undefined && r.ms >= 50 ? ` · <i>${(r.ms / 1000).toFixed(1)}s</i>` : "";
-            const count = r.count > 1 ? ` ×${r.count}` : "";
-            const target = r.target ? ` <code>${r.target}</code>` : "";
-            return `• <code>${mark}</code> <code>${r.name}</code>${target}${count}${dur}`;
-        };
-
-        if (visibleFinished.length > 0) {
-            parts.push(`<b>Recent Operations</b>\n` + visibleFinished.map(formatBbsItem).join("\n"));
-        }
-
-        if (collapsedFinished.length > 0) {
-            parts.push(`<blockquote expandable><b>📁 Tool Archive (${collapsedFinished.length} earlier calls · tap to open)</b>\n` +
-                collapsedFinished.map(formatBbsItem).join("\n") + `</blockquote>`);
-        }
-
-        if (childWork.length > 0) {
-            const formatDelegate = (c: LiveTailTool) => {
-                const mark = c.state === "running" ? "→" : c.state === "error" ? "❌" : "✓";
-                const dur = c.elapsedMs !== undefined && c.elapsedMs >= 50 ? ` · ${(c.elapsedMs / 1000).toFixed(1)}s` : "";
-                return `• ${mark} <b>Subagent</b>${c.name ? `: <i>${esc(c.name, 40)}</i>` : ""}${dur}`;
-            };
-            parts.push(`<blockquote expandable><b>👥 Delegates (${childWork.length}) · tap to open</b>\n` +
-                childWork.map(formatDelegate).join("\n") + `</blockquote>`);
-        }
-
-        if (cfg.reasoning !== "hidden" && reasoningTail) {
-            parts.push(`<blockquote expandable><b>🧠 Reasoning & Stream · tap to open</b>\n<i>${esc(reasoningTail, 900)}</i></blockquote>`);
-        }
-
-        parts.push(`<b>Status:</b> ${completedCount} done${runningCount ? ` · ${runningCount} active` : ""} · <code>${modelLabel}</code> · <code>${elapsed}</code>`);
-        return parts.join("\n\n");
-    }
-
-    // ─────────────────────────────────────────────────────────────
-    // PRESET 2: Tactical Tree + Tree Connectors
-    // ─────────────────────────────────────────────────────────────
-    if (style === "tactical") {
-        const parts: string[] = [];
-        parts.push(`◤◢◤◢ <b>VENOM // RUNTIME PIPELINE</b> ◣◥◣◥\n<b>Phase:</b> <i>${s.settled ? "Complete" : activeRow ? "Executing " + activeRow.name : "Reasoning"}</i>`);
-
-        if (activeRow) {
-            const dur = activeRow.ms !== undefined && activeRow.ms >= 100 ? ` (${(activeRow.ms / 1000).toFixed(1)}s)` : "";
-            parts.push(`<b>Current Operation:</b>\n<code>▸ ${activeRow.name}: ${activeRow.target || "running"}</code><i>${dur}</i>`);
-        }
-
-        const MAX_RECENT = 3;
-        const visibleFinished = finishedRows.slice(-MAX_RECENT);
-        const collapsedFinished = finishedRows.slice(0, -MAX_RECENT);
-
-        const formatTacticalItem = (r: LiveTailRow, idx: number, total: number): string => {
-            const connector = idx === total - 1 ? "└─" : "├─";
-            const mark = r.state === "error" ? "❌" : "✓";
-            const dur = r.ms !== undefined && r.ms >= 50 ? ` [${(r.ms / 1000).toFixed(1)}s]` : "";
-            const target = r.target ? ` · <code>${r.target}</code>` : "";
-            return `${connector} <code>${mark}</code> <code>${r.name}</code>${target}${dur}`;
-        };
-
-        if (visibleFinished.length > 0) {
-            parts.push(`<b>Active Context:</b>\n` + visibleFinished.map((r, i) => formatTacticalItem(r, i, visibleFinished.length)).join("\n"));
-        }
-
-        if (collapsedFinished.length > 0) {
-            parts.push(`<blockquote expandable><b>📦 Collapsed Operations [${collapsedFinished.length} historical calls]</b>\n` +
-                collapsedFinished.map((r, i) => formatTacticalItem(r, i, collapsedFinished.length)).join("\n") + `</blockquote>`);
-        }
-
-        if (childWork.length > 0) {
-            const formatDelegate = (c: LiveTailTool, i: number, tot: number) => {
-                const conn = i === tot - 1 ? "└─" : "├─";
-                const mark = c.state === "running" ? "▸" : c.state === "error" ? "❌" : "✓";
-                return `${conn} <code>${mark}</code> <b>${c.name || "Agent"}</b> · <code>${c.state}</code>`;
-            };
-            parts.push(`<blockquote expandable><b>🎯 Subagent Delegates (${childWork.length})</b>\n` +
-                childWork.map((c, i) => formatDelegate(c, i, childWork.length)).join("\n") + `</blockquote>`);
-        }
-
-        if (cfg.reasoning !== "hidden" && reasoningTail) {
-            parts.push(`<blockquote expandable><b>⚡ Symbiote Intent</b>\n<i>${esc(reasoningTail, 900)}</i></blockquote>`);
-        }
-
-        parts.push(`<b>Metrics:</b> ${completedCount + runningCount} ops · ${runningCount ? `${runningCount} active · ` : ""}${modelLabel} · <code>${elapsed}</code>`);
-        return parts.join("\n\n");
-    }
-
-    // ─────────────────────────────────────────────────────────────
-    // PRESET 3: Categorized Group Dropdown
-    // ─────────────────────────────────────────────────────────────
-    if (style === "categorized") {
-        const parts: string[] = [];
-        const filled = Math.min(8, Math.max(1, Math.floor((span % 16) / 2) + 1));
-        const bar = "▰".repeat(filled) + "▱".repeat(8 - filled);
-        parts.push(`⚡ <b>Venom is executing</b> · <code>${bar}</code> <b>${elapsed}</b>`);
-
-        if (activeRow) {
-            parts.push(`<blockquote><b>Active:</b> <code>${activeRow.name} ${activeRow.target}</code></blockquote>`);
-        }
-
-        const visibleFinished = finishedRows.slice(-2);
-        if (visibleFinished.length > 0) {
-            const recentLines = visibleFinished.map(r => {
-                const dur = r.ms !== undefined && r.ms >= 50 ? `${(r.ms / 1000).toFixed(1)}s` : "done";
-                return `• <code>${dur}</code> <b>${r.name}</b> <code>${r.target}</code>`;
-            });
-            parts.push(`<b>Latest:</b>\n` + recentLines.join("\n"));
-        }
-
-        // Categorize finished rows
-        if (finishedRows.length > 0) {
-            const isInspect = (n: string) => /read|search|grep|find|list|glob|stat|check/i.test(n);
-            const isMutate = (n: string) => /patch|write|edit|sed|modify|touch|append/i.test(n);
-            const isSystem = (n: string) => /bash|sh|exec|terminal|git|systemctl|npm|node|python/i.test(n);
-
-            const inspects = finishedRows.filter(r => isInspect(r.name));
-            const mutates = finishedRows.filter(r => isMutate(r.name));
-            const systems = finishedRows.filter(r => isSystem(r.name) || (!isInspect(r.name) && !isMutate(r.name)));
-
-            const formatCat = (r: LiveTailRow) => `• <code>${r.name}</code> <code>${r.target}</code>` + (r.ms ? ` · <i>${(r.ms / 1000).toFixed(1)}s</i>` : "");
-
-            const catSections: string[] = [];
-            if (inspects.length > 0) {
-                catSections.push(`<b>Inspections:</b>\n` + inspects.map(formatCat).join("\n"));
-            }
-            if (mutates.length > 0) {
-                catSections.push(`<b>Code Modifications:</b>\n` + mutates.map(formatCat).join("\n"));
-            }
-            if (systems.length > 0) {
-                catSections.push(`<b>System Executions:</b>\n` + systems.map(formatCat).join("\n"));
-            }
-
-            parts.push(`<blockquote expandable><b>📜 Tool History (${finishedRows.length} calls · tap to inspect)</b>\n` +
-                catSections.join("\n\n") + `</blockquote>`);
-        }
-
-        if (cfg.reasoning !== "hidden" && reasoningTail) {
-            parts.push(`<blockquote expandable><b>Reasoning</b>\n<i>${esc(reasoningTail, 900)}</i></blockquote>`);
-        }
-
-        parts.push(`<code>${completedCount} done</code> · <code>${modelLabel}</code> · <code>~/pi-work</code>`);
-        return parts.join("\n\n");
-    }
-
-    // ─────────────────────────────────────────────────────────────
-    // PRESET 4: Hermes Classic (Fallback)
-    // ─────────────────────────────────────────────────────────────
     const parts: string[] = [];
-    const MAX_CURRENT = 5;
-    const prevRows = rows.length > MAX_CURRENT ? rows.slice(0, rows.length - MAX_CURRENT) : [];
-    const currRows = rows.length > MAX_CURRENT ? rows.slice(rows.length - MAX_CURRENT) : rows;
 
-    if (childWork.length > 0) {
-        parts.push("<b><u>Delegates</u></b>");
-        const formatDelegateItem = (child: LiveTailTool): string => {
-            const mark = child.state === "running" ? "→" : child.state === "error" ? "❌" : "✓";
-            const dur = child.elapsedMs !== undefined && child.elapsedMs >= 50
-                ? ` · ${(child.elapsedMs / 1000).toFixed(1)}s`
-                : "";
-            const stateText = child.state === "running" ? " · running" : ` · done${dur}`;
-            const labelText = child.name ? `: <i>${esc(child.name, 60)}</i>` : "";
-            let itemStr = `• ${mark} <b>Subagent</b>${labelText}${stateText}`;
-            if (child.update && child.state === "running") {
-                itemStr += `\n  └─ <code>${esc(child.update, 80)}</code>`;
-            } else if (child.result && child.state !== "running") {
-                itemStr += `\n  └─ <i>${esc(child.result, 80)}</i>`;
-            }
-            return itemStr;
-        };
+    // 1. Header (Big font in Telegram rich message)
+    parts.push("## Venom is working");
 
-        const activeChildren = childWork.filter(c => c.state === "running");
-        const finishedChildren = childWork.filter(c => c.state !== "running");
-        const allChildren = [...finishedChildren, ...activeChildren];
+    // 2. Telemetry GFM Table (Bordered & Striped in Telegram rich message)
+    const nowText = activeRow ? `${activeRow.name}: ${activeRow.target || "running"}` : s.settled ? "completed" : "reasoning";
+    const whyText = reasoningTail ? reasoningTail.slice(0, 50).replace(/\n/g, " ") + (reasoningTail.length > 50 ? "…" : "") : "analyzing request";
+    const stateText = `${completedCount} done${runningCount ? ` · ${runningCount} running` : ""}`;
 
-        const MAX_CURRENT_CHILDREN = 3;
-        const prevChildren = allChildren.length > MAX_CURRENT_CHILDREN
-            ? allChildren.slice(0, allChildren.length - MAX_CURRENT_CHILDREN)
-            : [];
-        const currChildren = allChildren.length > MAX_CURRENT_CHILDREN
-            ? allChildren.slice(allChildren.length - MAX_CURRENT_CHILDREN)
-            : allChildren;
+    parts.push(
+        "| Field | Value |\n" +
+        "|:--|:--|\n" +
+        `| **Now** | ${nowText} |\n` +
+        `| **Why** | ${whyText} |\n` +
+        `| **State** | ${stateText} |\n` +
+        `| **Time** | ${elapsed} |`
+    );
 
-        if (prevChildren.length > 0) {
-            parts.push(`<blockquote expandable><b><u>Previous delegates</u> (${prevChildren.length}) · tap to expand</b>\n${prevChildren.map(formatDelegateItem).join("\n")}</blockquote>`);
-        }
-        parts.push(currChildren.map(formatDelegateItem).join("\n"));
-    }
-
+    // 3. Tools Section (Big font '## Tools', native list items with '- ')
     if (cfg.tools !== "hidden" && rows.length > 0) {
-        parts.push("<b><u>Tools</u></b>");
+        parts.push("## Tools");
 
-        const formatHermesItem = (r: LiveTailRow): string => {
-            const icon = r.state === "error" ? "❌" : r.state === "running" ? "→" : "✅";
+        const toolLines: string[] = [];
+
+        // If there's an active running tool, show it at top with →
+        if (activeRow) {
+            const dur = activeRow.ms !== undefined && activeRow.ms >= 100 ? ` · ${(activeRow.ms / 1000).toFixed(1)}s` : "";
+            const targetText = activeRow.target ? `: \`${activeRow.target}\`` : "";
+            toolLines.push(`- → **${activeRow.name}**${targetText} · running${dur}`);
+        }
+
+        // Show up to the last 3 completed tools
+        const MAX_RECENT = 3;
+        const visibleFinished = finishedRows.slice(-MAX_RECENT);
+        const collapsedFinished = finishedRows.slice(0, -MAX_RECENT);
+
+        const formatHermesRichItem = (r: LiveTailRow): string => {
+            const mark = r.state === "error" ? "❌" : "✓";
             const dur = r.ms !== undefined && r.ms >= 50 ? ` · ${(r.ms / 1000).toFixed(1)}s` : "";
             const count = r.count > 1 ? ` ×${r.count}` : "";
-            const statusText = r.state === "running" ? " · running" : r.state === "error" ? ` · failed${dur}` : ` · done${dur}`;
-            const targetText = r.target ? `: <code>${r.target}</code>` : "";
-            return `• ${icon} <b>${r.name}</b>${targetText}${count}${statusText}`;
+            const targetText = r.target ? `: \`${r.target}\`` : "";
+            return `- ${mark} **${r.name}**${targetText}${count}${dur}`;
         };
 
-        if (prevRows.length > 0) {
-            parts.push(`<blockquote expandable><b><u>Previous tools</u> (${prevRows.length}) · tap to expand</b>\n${prevRows.map(formatHermesItem).join("\n")}</blockquote>`);
+        for (const r of visibleFinished) {
+            toolLines.push(formatHermesRichItem(r));
         }
 
-        parts.push(currRows.map(formatHermesItem).join("\n"));
+        if (toolLines.length > 0) {
+            parts.push(toolLines.join("\n"));
+        }
+
+        // 4. Tool Archive Dropdown (Native Telegram <details> accordion)
+        if (collapsedFinished.length > 0) {
+            parts.push(
+                `<details><summary>📁 <b>Tool Archive (${collapsedFinished.length} historical calls)</b></summary>\n\n` +
+                collapsedFinished.map(formatHermesRichItem).join("\n") +
+                "\n</details>"
+            );
+        }
     } else if (!s.settled) {
-        parts.push("<b><u>Tools</u></b>\n• → <i>working...</i>");
+        parts.push("## Tools\n\n- → *working...*");
     }
 
+    // 5. Delegates Dropdown (Native Telegram <details> accordion)
+    if (childWork.length > 0) {
+        const formatDelegate = (c: LiveTailTool) => {
+            const mark = c.state === "running" ? "→" : c.state === "error" ? "❌" : "✓";
+            const dur = c.elapsedMs !== undefined && c.elapsedMs >= 50 ? ` · ${(c.elapsedMs / 1000).toFixed(1)}s` : "";
+            return `- ${mark} **Subagent**${c.name ? `: *${c.name}*` : ""}${dur}`;
+        };
+        parts.push(
+            `<details><summary>👥 <b>Delegates (${childWork.length})</b></summary>\n\n` +
+            childWork.map(formatDelegate).join("\n") +
+            "\n</details>"
+        );
+    }
+
+    // 6. Reasoning Dropdown (Native Telegram <details> accordion)
     if (cfg.reasoning !== "hidden" && reasoningTail) {
-        parts.push(`<blockquote expandable><b><u>Reasoning</u> · tap to expand</b>\n${esc(reasoningTail, 900)}</blockquote>`);
+        parts.push(
+            `<details><summary>🧠 <b>Reasoning</b></summary>\n\n` +
+            reasoningTail +
+            "\n</details>"
+        );
     }
 
-    const statusText = s.settled
-        ? `${completedCount} done · ${modelLabel} · ~/pi-work · ${elapsed}`
-        : `${completedCount} done${runningCount ? ` · ${runningCount} running` : ""} · ${modelLabel} · ~/pi-work · ${elapsed}`;
-
-    parts.push(`<b><u>Status</u></b>\n${statusText}`);
+    // 7. Status Heading & Telemetry
+    parts.push(`## Status\n\n${completedCount} completed · \`${modelLabel}\` · \`${elapsed}\``);
 
     return parts.join("\n\n");
 }

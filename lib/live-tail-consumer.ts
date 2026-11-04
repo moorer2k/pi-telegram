@@ -143,7 +143,7 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
         state.dirty = state.revision !== sentRevision;
         return;
       }
-      const view = { text, parseMode: "html" as const };
+      const view = { text, parseMode: "rich" as const };
       if (!state.handle && state.initialSendAttempted) {
         state.failed = true;
         state.dirty = false;

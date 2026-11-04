@@ -6,7 +6,7 @@
 import { type TelegramInlineKeyboardMarkup } from "./keyboard.ts";
 import { type TelegramTarget } from "./target.ts";
 import { type TelegramBridgeApiRuntime } from "./telegram-api.ts";
-export type TelegramDeliveryParseMode = "plain" | "html" | "markdown";
+export type TelegramDeliveryParseMode = "plain" | "html" | "markdown" | "rich";
 export interface TelegramDeliveryView {
     text: string;
     parseMode?: TelegramDeliveryParseMode;
@@ -91,7 +91,9 @@ export interface TelegramBridgeDeliveryRuntimeDeps {
     getTargetPolicyView: () => TelegramDeliveryTargetPolicyView;
     getActiveTurnTarget: () => TelegramDeliveryTarget | undefined;
     isTransportActive?: () => boolean;
-    api: Pick<TelegramBridgeApiRuntime, "sendMessage" | "editMessageText" | "deleteMessage" | "sendChatAction">;
+    api: Pick<TelegramBridgeApiRuntime, "sendMessage" | "editMessageText" | "deleteMessage" | "sendChatAction"> & {
+        sendRichMessage?: TelegramBridgeApiRuntime["sendRichMessage"];
+    };
     recordOwnership: (input: {
         chatId: number;
         messageId: number;

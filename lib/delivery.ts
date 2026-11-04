@@ -34,7 +34,7 @@ class TelegramDeliveryTransportGenerationError extends Error {
   }
 }
 
-export type TelegramDeliveryParseMode = "plain" | "html" | "markdown";
+export type TelegramDeliveryParseMode = "plain" | "html" | "markdown" | "rich";
 
 export interface TelegramDeliveryView {
   text: string;
@@ -173,7 +173,9 @@ export interface TelegramBridgeDeliveryRuntimeDeps {
   api: Pick<
     TelegramBridgeApiRuntime,
     "sendMessage" | "editMessageText" | "deleteMessage" | "sendChatAction"
-  >;
+  > & {
+    sendRichMessage?: TelegramBridgeApiRuntime["sendRichMessage"];
+  };
   recordOwnership: (input: {
     chatId: number;
     messageId: number;
@@ -781,6 +783,9 @@ export function createTelegramBridgeDeliveryRuntime(
     },
     renderView(view) {
       assertTelegramInlineKeyboardCallbackData(view.replyMarkup);
+      if (view.parseMode === "rich") {
+        return [{ text: view.text, parseMode: "rich" as const }];
+      }
       return renderTelegramMessage(view.text, {
         mode: view.parseMode ?? "plain",
       }).map(function (chunk) {
@@ -793,11 +798,21 @@ export function createTelegramBridgeDeliveryRuntime(
     async sendChunk(target, chunk, options) {
       assertTransportActive();
       assertOutputTarget(target);
-      const sent = await withTelegramReplyParameters(
+      const sent: any = await withTelegramReplyParameters(
         target.chatId,
         options.replyToMessageId,
         target,
         (replyParameters) => {
+          if (chunk.parseMode === "rich") {
+            const body = {
+              chat_id: target.chatId,
+              rich_message: { markdown: chunk.text },
+              ...getTelegramTargetThreadParams(target),
+              ...(replyParameters ? { reply_parameters: replyParameters } : {}),
+              ...(options.replyMarkup ? { reply_markup: options.replyMarkup } : {}),
+            };
+            return deps.api.sendRichMessage ? deps.api.sendRichMessage(body as any) : deps.api.sendMessage(body as any);
+          }
           const body = {
             chat_id: target.chatId,
             text: chunk.text,
@@ -824,6 +839,18 @@ export function createTelegramBridgeDeliveryRuntime(
     async editChunk(target, messageId, chunk, options) {
       assertTransportActive();
       assertOutputTarget(target);
+      if (chunk.parseMode === "rich") {
+        await (deps.api as any).editMessageText({
+          chat_id: target.chatId,
+          message_id: messageId,
+          ...({ rich_message: { markdown: chunk.text } } as any),
+          reply_markup:
+            options.replyMarkup === null
+              ? { inline_keyboard: [] }
+              : options.replyMarkup,
+        });
+        return;
+      }
       await deps.api.editMessageText({
         chat_id: target.chatId,
         message_id: messageId,
