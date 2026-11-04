@@ -100,33 +100,11 @@ export function getAuthorizedTelegramCallbackQuery(update, allowedUserId) {
         return query;
     return query.from.id === allowedUserId ? query : undefined;
 }
-function hasTelegramMentionEntity(message) {
-    const entities = message?.entities ?? message?.caption_entities;
-    if (!Array.isArray(entities))
-        return false;
-    return entities.some((entity) => {
-        if (entity.type !== "mention")
-            return false;
-        const username = String(message.chat?.username ?? "").replace(/^@/, "").toLowerCase();
-        const text = String(entity.text ?? "").replace(/^@/, "").toLowerCase();
-        return username.length > 0 && text === username;
-    });
-}
 function authorizeTelegramHumanMessage(message, allowedUserId) {
     if (!message || !message.from || message.from.is_bot)
         return undefined;
-    // Group and supergroup messages become turns when the bot is @mentioned
-    // (guest turns, tagged with speaker identity at prompt-build time) or when
-    // the paired owner speaks. Private chats still require the paired owner.
-    const chatType = message.chat?.type;
-    if (chatType === "private")
+    if (message.chat.type === "private")
         return message;
-    if (chatType === "group" || chatType === "supergroup") {
-        return hasTelegramMentionEntity(message) ||
-            message.from.id === allowedUserId
-            ? message
-            : undefined;
-    }
     return message.from.id === allowedUserId ? message : undefined;
 }
 export function getAuthorizedTelegramMessage(update, allowedUserId) {

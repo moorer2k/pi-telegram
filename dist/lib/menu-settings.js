@@ -361,15 +361,16 @@ async function updateAssistantRenderingSettingsMessage(deps) {
 }
 function liveTailSettingsMarkup(settings) {
     const enabled = settings.enabled !== false;
+    const style = settings.style ?? "hermes";
     const detail = settings.detail ?? "standard";
     const reasoning = settings.reasoning ?? "collapsed";
     const tools = settings.tools ?? "recent";
-    const interval = String(settings.interval ?? 2);
+    const interval = String(settings.interval ?? 1);
     const autoDelete = settings.autoDelete ?? "keep";
     const rows = [
         [
             { text: enabled ? "🟢 Live Tail ON" : "⚪ Live Tail OFF", callback_data: "settings:live-tail:enabled:" + (enabled ? "off" : "on") },
-            { text: "🔄 Reload", callback_data: "settings:live-tail:update" },
+            { text: "🎨 " + style, callback_data: "settings:live-tail:choose:style" },
         ],
         [
             { text: "📊 " + detail, callback_data: "settings:live-tail:choose:detail" },
@@ -390,6 +391,7 @@ function liveTailSettingsMarkup(settings) {
     return { inline_keyboard: rows };
 }
 const LIVE_TAIL_CHOICES = {
+    style: { title: "Style", icon: "🎨", values: ["hermes", "terminal", "accent", "minimal"] },
     detail: { title: "Detail", icon: "📊", values: ["minimal", "standard", "detailed"] },
     reasoning: { title: "Reasoning", icon: "🧠", values: ["hidden", "collapsed", "expanded"] },
     tools: { title: "Tools", icon: "🛠", values: ["hidden", "active", "recent"] },
@@ -398,11 +400,12 @@ const LIVE_TAIL_CHOICES = {
 };
 function liveTailChoiceMarkup(key, settings) {
     const choice = LIVE_TAIL_CHOICES[key];
-    const current = key === "interval" ? String(settings.interval ?? 2)
-        : key === "autoDelete" ? settings.autoDelete ?? "keep"
-            : key === "detail" ? settings.detail ?? "standard"
-                : key === "reasoning" ? settings.reasoning ?? "collapsed"
-                    : settings.tools ?? "recent";
+    const current = key === "style" ? settings.style ?? "hermes"
+        : key === "interval" ? String(settings.interval ?? 2)
+            : key === "autoDelete" ? settings.autoDelete ?? "keep"
+                : key === "detail" ? settings.detail ?? "standard"
+                    : key === "reasoning" ? settings.reasoning ?? "collapsed"
+                        : settings.tools ?? "recent";
     const buttons = choice.values.map(value => ({
         text: (value === current ? "✓ " : "") + (key === "interval" ? value + "s" : value),
         callback_data: "settings:live-tail:" + key + ":" + value,

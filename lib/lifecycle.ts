@@ -85,9 +85,9 @@ export interface TelegramLifecycleRegistrationDeps {
     ctx: ExtensionContext,
   ) => Promise<void>;
   onSessionBeforeCompact?: (
-    event: SessionBeforeCompactEvent,
+    event: any,
     ctx: ExtensionContext,
-  ) => Promise<void> | void;
+  ) => Promise<any> | any;
   onSessionCompact?: (
     event: SessionCompactEvent,
     ctx: ExtensionContext,
@@ -1014,7 +1014,7 @@ export function registerTelegramLifecycleHooks(
   });
   pi.on("session_before_compact", async (event, ctx) => {
     if (!isActive(ctx)) return;
-    await deps.onSessionBeforeCompact?.(event, ctx);
+    return await deps.onSessionBeforeCompact?.(event, ctx);
   });
   pi.on("session_compact", async (event, ctx) => {
     if (!isActive(ctx)) return;

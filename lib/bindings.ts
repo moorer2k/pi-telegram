@@ -1,3 +1,4 @@
+import { offloadCompactionToOmniRoute } from "./compaction-offload.ts";
 /**
  * Telegram bridge binding composition
  * Zones: telegram, pi agent, orchestration
@@ -1276,6 +1277,7 @@ interface TelegramLifecycleBindingDeps {
 }
 
 export function registerTelegramLifecycleRuntimeHooks({
+
   pi,
   publicationRuntime,
   activityRuntime,
@@ -1327,6 +1329,12 @@ export function registerTelegramLifecycleRuntimeHooks({
   recordRuntimeEvent,
   onSessionSettled,
 }: TelegramLifecycleBindingDeps): void {
+  const isTurnOrSessionActive = (c: Pi.ExtensionContext): boolean => {
+    if (isSessionContextActive(c)) return true;
+    const t = activeTurnRuntime.get();
+    const cid = t?.target?.chatId ?? t?.chatId;
+    return typeof cid === "number" && cid < 0;
+  };
   const agentEndResetter = Runtime.createTelegramAgentEndResetter({
     abort,
     typing,
@@ -1519,7 +1527,7 @@ export function registerTelegramLifecycleRuntimeHooks({
     getFoldQueuedPromptsIntoHistory:
       lifecycle.shouldFoldQueuedPromptsIntoHistory,
     resetRuntimeState: agentEndResetter,
-    isSessionActive: isSessionContextActive,
+    isSessionActive: isTurnOrSessionActive,
     isTurnTransportActive,
     waitForTypingIdle: typing.waitForIdle,
     dispatchNextQueuedTelegramTurn,
@@ -1637,7 +1645,7 @@ export function registerTelegramLifecycleRuntimeHooks({
   const messageActivityTypingHooks =
     Lifecycle.createTelegramMessageActivityTypingHooks({
       hasActiveTurn: activeTurnRuntime.has,
-      isContextActive: isSessionContextActive,
+      isContextActive: isTurnOrSessionActive,
       getSessionGeneration,
       startTypingLoop: startActiveTurnTypingLoop,
       onMessageStart: previewRuntime.onMessageStart,
@@ -1646,7 +1654,7 @@ export function registerTelegramLifecycleRuntimeHooks({
     });
   const messageActivityHooks = messageActivityTypingHooks;
   Lifecycle.registerTelegramLifecycleHooks(pi, {
-    isSessionActive: isSessionContextActive,
+    isSessionActive: isTurnOrSessionActive,
     ...sessionLifecycleRuntime,
     ...agentLifecycleHooks,
     ...(onSteerTurnEnd ? {
@@ -1697,8 +1705,8 @@ export function registerTelegramLifecycleRuntimeHooks({
       }
       await sessionLifecycleRuntime.onSessionShutdown(event, ctx);
     },
-    async onSessionBeforeCompact(event, ctx) {
-      if (!isSessionContextActive(ctx)) return;
+    async onSessionBeforeCompact(event: any, ctx: Pi.ExtensionContext) {
+      if (!isTurnOrSessionActive(ctx)) return;
       const shouldNotify = !(lifecycle.isCompactionInProgress?.() ?? false);
       if (shouldNotify) observedAutomaticCompaction = true;
       activityRuntime.onCompactionStart(Pi.getSessionCompactionReason(event));
@@ -1708,6 +1716,12 @@ export function registerTelegramLifecycleRuntimeHooks({
           Commands.TELEGRAM_COMPACTION_STARTED_MARKDOWN,
           ctx,
         );
+      try {
+        const offloaded = await offloadCompactionToOmniRoute(event, ctx);
+        if (offloaded?.compaction) {
+          return offloaded;
+        }
+      } catch (_) {}
     },
     async onSessionCompact(event, ctx) {
       if (!isSessionContextActive(ctx)) return;
@@ -1732,12 +1746,12 @@ export function registerTelegramLifecycleRuntimeHooks({
       sendCompactionNotice(notice, ctx);
     },
     async onAgentStart(event, ctx) {
-      if (!isSessionContextActive(ctx)) return;
+      if (!isTurnOrSessionActive(ctx)) return;
       const generation = getSessionGeneration?.();
       agentWorkActive = true;
       cancelPendingFinalPublication();
       await agentStartWithDedupReset(event, ctx);
-      if (!isSessionContextActive(ctx) || (getSessionGeneration && !Object.is(getSessionGeneration(), generation))) return;
+      if (!isTurnOrSessionActive(ctx) || (getSessionGeneration && !Object.is(getSessionGeneration(), generation))) return;
       const turn = activeTurnRuntime.get();
       activityRuntime.onAgentStart(turn?.target, turn?.replyToMessageId);
       startAgentActivityTypingLoop(ctx);
@@ -1745,40 +1759,62 @@ export function registerTelegramLifecycleRuntimeHooks({
     // Explicit signals emitted by cooperating subagent/background tools.
     // Ordinary tool names and output text never create synthetic child jobs.
     async onToolExecutionStart(event, ctx) {
-      if (!isSessionContextActive(ctx)) return;
-      agentLifecycleHooks.onToolExecutionStart();
-      const childSignal = Activity.readTelegramChildWorkSignal(event.args);
-      if (childSignal?.phase === "start") activityRuntime.onChildWorkStart({ workId: childSignal.workId, kind: childSignal.kind, label: childSignal.label, parentToolCallId: event.toolCallId });
+      if (!isTurnOrSessionActive(ctx)) return;
+      try {
+        agentLifecycleHooks.onToolExecutionStart();
+      } catch (_) {}
       activityRuntime.onToolStart({
         toolCallId: event.toolCallId,
         toolName: event.toolName,
         args: event.args,
       });
+      const isSubagent = /delegate|subagent|workflow/i.test(event.toolName);
+      if (isSubagent) {
+        let label = (event.args as any)?.goal || (event.args as any)?.task || (event.args as any)?.prompt || (event.args as any)?.name || event.toolName;
+        if (typeof label === "object") label = JSON.stringify(label);
+        activityRuntime.onChildWorkStart?.({
+          workId: event.toolCallId,
+          kind: "subagent",
+          label: String(label || "").slice(0, 80),
+          parentToolCallId: event.toolCallId,
+        });
+      }
     },
     onToolExecutionUpdate(event, ctx) {
-      if (!isSessionContextActive(ctx)) return;
-      const childSignal = Activity.readTelegramChildWorkSignal(event.partialResult);
-      if (childSignal?.phase === "start") activityRuntime.onChildWorkStart({ workId: childSignal.workId, kind: childSignal.kind, label: childSignal.label, parentToolCallId: event.toolCallId });
-      else if (childSignal?.phase === "update") activityRuntime.onChildWorkUpdate({ workId: childSignal.workId, message: childSignal.message });
-      else if (childSignal?.phase === "end") activityRuntime.onChildWorkEnd({ workId: childSignal.workId, isError: childSignal.isError, result: childSignal.result });
+      if (!isTurnOrSessionActive(ctx)) return;
       activityRuntime.onToolUpdate({
         toolCallId: event.toolCallId,
         toolName: event.toolName,
         update: event.partialResult,
       });
+      const isSubagent = /delegate|subagent|workflow/i.test(event.toolName);
+      if (isSubagent) {
+        const updateMsg = typeof event.partialResult === "string" ? event.partialResult : (event.partialResult as any)?.message || (event.partialResult as any)?.status;
+        if (updateMsg) {
+          activityRuntime.onChildWorkUpdate?.({
+            workId: event.toolCallId,
+            message: String(updateMsg).slice(0, 100),
+          });
+        }
+      }
     },
     async onToolExecutionEnd(event, ctx) {
-      if (!isSessionContextActive(ctx)) return;
-      const childSignal = Activity.readTelegramChildWorkSignal(event.result);
-      if (childSignal?.phase === "start") activityRuntime.onChildWorkStart({ workId: childSignal.workId, kind: childSignal.kind, label: childSignal.label, parentToolCallId: event.toolCallId });
-      else if (childSignal?.phase === "update") activityRuntime.onChildWorkUpdate({ workId: childSignal.workId, message: childSignal.message });
-      else if (childSignal?.phase === "end") activityRuntime.onChildWorkEnd({ workId: childSignal.workId, isError: childSignal.isError, result: childSignal.result });
+      if (!isTurnOrSessionActive(ctx)) return;
       activityRuntime.onToolEnd({
         toolCallId: event.toolCallId,
         toolName: event.toolName,
         result: event.result,
         isError: event.isError,
       });
+      const isSubagent = /delegate|subagent|workflow/i.test(event.toolName);
+      if (isSubagent) {
+        const resText = typeof event.result === "string" ? event.result : (event.result as any)?.content ? JSON.stringify((event.result as any).content) : "";
+        activityRuntime.onChildWorkEnd?.({
+          workId: event.toolCallId,
+          isError: event.isError,
+          result: String(resText || "").slice(0, 120),
+        });
+      }
       agentLifecycleHooks.onToolExecutionEnd(event, ctx);
     },
     async onMessageStart(event, ctx) {

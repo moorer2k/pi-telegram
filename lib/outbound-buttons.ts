@@ -105,10 +105,14 @@ function normalizeMarkdownAfterButtonExtraction(markdown: string): string {
 function parseTelegramButtonAction(
   payload: Record<string, unknown>,
 ): TelegramOutboundButtonAction | undefined {
+  if (!payload || typeof payload !== "object") return undefined;
   const value = getTelegramButtonString(payload, "value");
-  const explicitLabel = getTelegramButtonString(payload, "label");
+  const explicitText = getTelegramButtonString(payload, "text");
+  const explicitLabel = getTelegramButtonString(payload, "label") ?? explicitText;
+  const emoji = getTelegramButtonString(payload, "emoji");
   const explicitPrompt = getTelegramButtonString(payload, "prompt");
-  const label = explicitLabel ?? value ?? explicitPrompt;
+  const rawLabel = explicitLabel ?? value ?? explicitPrompt;
+  const label = (emoji && rawLabel && !rawLabel.startsWith(emoji)) ? `${emoji} ${rawLabel}` : rawLabel;
   if (payload.disabled !== undefined && typeof payload.disabled !== "boolean") {
     return undefined;
   }
@@ -250,8 +254,33 @@ export function planTelegramButtonReply(
     if (rows) footerKeyboard.push(...rows);
     return "";
   });
+  const tagRegex = /<telegram_button\b[^>]*>([\s\S]*?)<\/telegram_button>/gi;
+  const strippedTags = stripped.replace(tagRegex, (_, inner) => {
+    try {
+      const raw = inner.trim();
+      if (!raw) return "";
+      const parsed = JSON.parse(raw);
+      const items = Array.isArray(parsed) ? parsed : [parsed];
+      const actions = items.map(parseTelegramButtonAction).filter(Boolean);
+      if (actions.length > 0) {
+        const row = actions.map((action) =>
+          action!.disabled
+            ? { text: action!.text || "\u00a0", disabled: {} }
+            : {
+                text: action!.text,
+                callback_data: deps.registerAction({
+                  ...action!,
+                  ...(deps.binding ? { binding: deps.binding } : {}),
+                }),
+              },
+        );
+        footerKeyboard.push(row);
+      }
+    } catch (_) {}
+    return "";
+  });
   const withRichButtons = replaceTelegramButtonFences(
-    stripped,
+    strippedTags,
     (payload, closed) => {
       if (!closed) return "";
       const payloadRows = parseTelegramButtonPayloadRows(payload);

@@ -24,7 +24,7 @@ export interface TelegramLifecycleRegistrationDeps {
     onInput?: (event: InputEvent, ctx: ExtensionContext) => Promise<void> | void;
     onSessionStart: (event: SessionStartEvent, ctx: ExtensionContext) => Promise<void>;
     onSessionShutdown: (event: SessionShutdownEvent, ctx: ExtensionContext) => Promise<void>;
-    onSessionBeforeCompact?: (event: SessionBeforeCompactEvent, ctx: ExtensionContext) => Promise<void> | void;
+    onSessionBeforeCompact?: (event: any, ctx: ExtensionContext) => Promise<any> | any;
     onSessionCompact?: (event: SessionCompactEvent, ctx: ExtensionContext) => Promise<void> | void;
     onSessionCompactFailed?: (event: SessionCompactFailedEvent, ctx: ExtensionContext) => Promise<void> | void;
     onBeforeAgentStart: (event: TelegramBeforeAgentStartEvent, ctx: ExtensionContext) => TelegramBeforeAgentStartReturn;

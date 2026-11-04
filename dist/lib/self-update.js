@@ -1,6 +1,7 @@
 /**
  * Telegram extension updater using the existing Pi-Bolt systemd restart configuration.
  * Mirrors VENOM maintenance: installed checkout, clean tree, fast-forward, configured scope.
+ * Zones: telegram, pi agent
  */
 import { spawn } from "node:child_process";
 import { dirname, resolve } from "node:path";

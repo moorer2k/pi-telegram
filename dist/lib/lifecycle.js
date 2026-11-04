@@ -578,7 +578,7 @@ export function registerTelegramLifecycleHooks(pi, deps) {
     pi.on("session_before_compact", async (event, ctx) => {
         if (!isActive(ctx))
             return;
-        await deps.onSessionBeforeCompact?.(event, ctx);
+        return await deps.onSessionBeforeCompact?.(event, ctx);
     });
     pi.on("session_compact", async (event, ctx) => {
         if (!isActive(ctx))

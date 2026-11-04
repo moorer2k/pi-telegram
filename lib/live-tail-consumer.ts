@@ -130,7 +130,12 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
     state.dirty = false;
     const sentRevision = state.revision;
     try {
-      const settings = getSettings();
+      const baseSettings = getSettings();
+      const dynamicModel = (state.latest as any)?.model?.id ?? (state.latest as any)?.model?.name ?? (baseSettings as any).model;
+      const settings = {
+        ...baseSettings,
+        ...(dynamicModel ? { model: dynamicModel } : {}),
+      };
       const text = renderLiveTail(state.projection.getSnapshot(), settings);
       // Do not emit a status-only message for turns without visible activity.
       if (!state.hasContent || text === state.lastText || !text.trim()) {

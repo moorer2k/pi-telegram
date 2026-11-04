@@ -76,6 +76,26 @@ export type TelegramActivityPayload =
       isError: boolean;
     }
   | {
+      type: "child-work-start";
+      workId: string;
+      kind: "subagent" | "background";
+      label?: string;
+      parentToolCallId?: string;
+      timestamp: number;
+    }
+  | {
+      type: "child-work-update";
+      workId: string;
+      message?: string;
+    }
+  | {
+      type: "child-work-end";
+      workId: string;
+      isError?: boolean;
+      result?: string;
+      timestamp: number;
+    }
+  | {
       type: "compaction-start";
       reason: "manual" | "threshold" | "overflow" | "unknown";
     }
@@ -498,9 +518,15 @@ export function createTelegramActivityBridgeRuntime(deps: {
     onToolEnd(event) {
       getRuntime()?.onToolEnd(event);
     },
-    onChildWorkStart(event) { getRuntime()?.onChildWorkStart(event); },
-    onChildWorkUpdate(event) { getRuntime()?.onChildWorkUpdate(event); },
-    onChildWorkEnd(event) { getRuntime()?.onChildWorkEnd(event); },
+    onChildWorkStart(event) {
+      getRuntime()?.onChildWorkStart?.(event);
+    },
+    onChildWorkUpdate(event) {
+      getRuntime()?.onChildWorkUpdate?.(event);
+    },
+    onChildWorkEnd(event) {
+      getRuntime()?.onChildWorkEnd?.(event);
+    },
     onCompactionStart(reason) {
       getRuntime()?.onCompactionStart(reason);
     },
@@ -573,9 +599,21 @@ export interface TelegramActivityRuntime {
     result: unknown;
     isError: boolean;
   }) => void;
-  onChildWorkStart: (event: { workId: string; kind: "subagent" | "background"; label: string; parentToolCallId?: string }) => void;
-  onChildWorkUpdate: (event: { workId: string; message: string }) => void;
-  onChildWorkEnd: (event: { workId: string; isError: boolean; result?: string }) => void;
+  onChildWorkStart?: (event: {
+    workId: string;
+    kind: "subagent" | "background";
+    label?: string;
+    parentToolCallId?: string;
+  }) => void;
+  onChildWorkUpdate?: (event: {
+    workId: string;
+    message?: string;
+  }) => void;
+  onChildWorkEnd?: (event: {
+    workId: string;
+    isError?: boolean;
+    result?: string;
+  }) => void;
   onCompactionStart: (
     reason: "manual" | "threshold" | "overflow" | "unknown",
   ) => void;
@@ -768,7 +806,7 @@ export function createTelegramActivityRuntime(deps: {
     },
     onChildWorkStart(event) {
       if (!activityId || !event.workId) return;
-      emit({ type: "child-work-start", ...event });
+      emit({ type: "child-work-start", timestamp: Date.now(), ...event });
     },
     onChildWorkUpdate(event) {
       if (!activityId || !event.workId) return;
@@ -776,7 +814,7 @@ export function createTelegramActivityRuntime(deps: {
     },
     onChildWorkEnd(event) {
       if (!activityId || !event.workId) return;
-      emit({ type: "child-work-end", ...event });
+      emit({ type: "child-work-end", timestamp: Date.now(), ...event });
     },
     onCompactionStart(reason) {
       abandonCompaction();

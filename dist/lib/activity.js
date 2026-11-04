@@ -5,6 +5,32 @@
  */
 import { deleteTelegramView, editTelegramView, sendTelegramChatAction, sendTelegramView, } from "./delivery.js";
 const TELEGRAM_ACTIVITY_REGISTRY_KEY = "__piTelegramActivityRegistry__";
+export function readTelegramChildWorkSignal(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value))
+        return undefined;
+    const record = value;
+    const details = record.details && typeof record.details === "object" && !Array.isArray(record.details)
+        ? record.details : undefined;
+    const raw = record.liveTailChildWork ?? details?.liveTailChildWork;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw))
+        return undefined;
+    const signal = raw;
+    const workId = signal.workId;
+    if (typeof workId !== "string" || workId.length === 0 || workId.length > 160 || !/^[a-zA-Z0-9][a-zA-Z0-9_.:-]*$/.test(workId))
+        return undefined;
+    if (signal.phase === "start" && (signal.kind === "subagent" || signal.kind === "background") &&
+        typeof signal.label === "string" && signal.label.length > 0) {
+        return { phase: "start", workId, kind: signal.kind, label: signal.label.slice(0, 160) };
+    }
+    if (signal.phase === "update" && typeof signal.message === "string") {
+        return { phase: "update", workId, message: signal.message.slice(0, 512) };
+    }
+    if (signal.phase === "end" && typeof signal.isError === "boolean") {
+        return { phase: "end", workId, isError: signal.isError,
+            ...(typeof signal.result === "string" ? { result: signal.result.slice(0, 512) } : {}) };
+    }
+    return undefined;
+}
 function getOrCreateTelegramActivityRegistry() {
     const globals = globalThis;
     const existing = globals[TELEGRAM_ACTIVITY_REGISTRY_KEY];
@@ -103,6 +129,9 @@ function canCoalesceActivityEvents(previous, next) {
     }
     if (previous.type === "tool-update" && next.type === "tool-update") {
         return previous.toolCallId === next.toolCallId;
+    }
+    if (previous.type === "child-work-update" && next.type === "child-work-update") {
+        return previous.workId === next.workId;
     }
     return false;
 }
@@ -250,6 +279,15 @@ export function createTelegramActivityBridgeRuntime(deps) {
         },
         onToolEnd(event) {
             getRuntime()?.onToolEnd(event);
+        },
+        onChildWorkStart(event) {
+            getRuntime()?.onChildWorkStart?.(event);
+        },
+        onChildWorkUpdate(event) {
+            getRuntime()?.onChildWorkUpdate?.(event);
+        },
+        onChildWorkEnd(event) {
+            getRuntime()?.onChildWorkEnd?.(event);
         },
         onCompactionStart(reason) {
             getRuntime()?.onCompactionStart(reason);
@@ -442,6 +480,21 @@ export function createTelegramActivityRuntime(deps) {
         },
         onToolEnd(event) {
             emit({ type: "tool-end", ...event });
+        },
+        onChildWorkStart(event) {
+            if (!activityId || !event.workId)
+                return;
+            emit({ type: "child-work-start", timestamp: Date.now(), ...event });
+        },
+        onChildWorkUpdate(event) {
+            if (!activityId || !event.workId)
+                return;
+            emit({ type: "child-work-update", ...event });
+        },
+        onChildWorkEnd(event) {
+            if (!activityId || !event.workId)
+                return;
+            emit({ type: "child-work-end", timestamp: Date.now(), ...event });
         },
         onCompactionStart(reason) {
             abandonCompaction();

@@ -45,7 +45,7 @@ export function buildTelegramReplyParameters(chatId, messageId, target) {
     if (messageId === undefined || messageId <= 0)
         return undefined;
     const key = getReplyDedupTargetKey(chatId, target);
-    if (lastRepliedToMessageIdByTarget.get(key) === messageId) {
+    if (chatId > 0 && lastRepliedToMessageIdByTarget.get(key) === messageId) {
         return undefined;
     }
     lastRepliedToMessageIdByTarget.set(key, messageId);
@@ -278,8 +278,57 @@ function hasClosingDisplayMathDelimiter(lines, startIndex) {
     }
     return false;
 }
-export function normalizeTelegramNativeMarkdown(markdown) {
+function ensureTelegramMarkdownBlockBoundaries(markdown) {
     const lines = markdown.replace(/\r\n/g, "\n").split("\n");
+    const out = [];
+    let inFence = false;
+    let inTable = false;
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const trimmed = line.trim();
+        if (/^ {0,3}(`{3,}|~{3,})/.test(trimmed)) {
+            inFence = !inFence;
+            out.push(line);
+            continue;
+        }
+        if (inFence) {
+            out.push(line);
+            continue;
+        }
+        const isTableLine = /^\s*\|.*\|\s*$/.test(line);
+        const isListLine = /^(\s*[-*+] |\s*\d+\. )/.test(line);
+        const isHeadingLine = /^#{1,6}\s+/.test(trimmed);
+        if (isTableLine) {
+            if (!inTable) {
+                if (out.length > 0 && out[out.length - 1].trim() !== "") {
+                    out.push("");
+                }
+                inTable = true;
+            }
+        }
+        else if (inTable) {
+            if (trimmed !== "") {
+                out.push("");
+            }
+            inTable = false;
+        }
+        if (isListLine && !inTable) {
+            if (out.length > 0 && out[out.length - 1].trim() !== "" && !/^(\s*[-*+] |\s*\d+\. )/.test(out[out.length - 1])) {
+                out.push("");
+            }
+        }
+        if (isHeadingLine) {
+            if (out.length > 0 && out[out.length - 1].trim() !== "") {
+                out.push("");
+            }
+        }
+        out.push(line);
+    }
+    return out.join("\n");
+}
+export function normalizeTelegramNativeMarkdown(markdown) {
+    const boundedMarkdown = ensureTelegramMarkdownBlockBoundaries(markdown);
+    const lines = boundedMarkdown.replace(/\r\n/g, "\n").split("\n");
     let fence;
     let displayMath = false;
     return lines

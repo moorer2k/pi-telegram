@@ -668,15 +668,16 @@ async function updateAssistantRenderingSettingsMessage(
 
 function liveTailSettingsMarkup(settings: TelegramLiveTailSettings): TelegramSettingsMenuReplyMarkup {
   const enabled = settings.enabled !== false;
+  const style = (settings as any).style ?? "hermes";
   const detail = settings.detail ?? "standard";
   const reasoning = settings.reasoning ?? "collapsed";
   const tools = settings.tools ?? "recent";
-  const interval = String(settings.interval ?? 2);
+  const interval = String(settings.interval ?? 1);
   const autoDelete = settings.autoDelete ?? "keep";
   const rows: TelegramSettingsMenuReplyMarkup["inline_keyboard"] = [
     [
       { text: enabled ? "🟢 Live Tail ON" : "⚪ Live Tail OFF", callback_data: "settings:live-tail:enabled:" + (enabled ? "off" : "on") },
-      { text: "🔄 Reload", callback_data: "settings:live-tail:update" },
+      { text: "🎨 " + style, callback_data: "settings:live-tail:choose:style" },
     ],
     [
       { text: "📊 " + detail, callback_data: "settings:live-tail:choose:detail" },
@@ -698,6 +699,7 @@ function liveTailSettingsMarkup(settings: TelegramLiveTailSettings): TelegramSet
 }
 
 const LIVE_TAIL_CHOICES: Record<string, { title: string; icon: string; values: readonly string[] }> = {
+  style: { title: "Style", icon: "🎨", values: ["hermes", "terminal", "accent", "minimal"] as const },
   detail: { title: "Detail", icon: "📊", values: ["minimal", "standard", "detailed"] },
   reasoning: { title: "Reasoning", icon: "🧠", values: ["hidden", "collapsed", "expanded"] },
   tools: { title: "Tools", icon: "🛠", values: ["hidden", "active", "recent"] },
@@ -707,7 +709,8 @@ const LIVE_TAIL_CHOICES: Record<string, { title: string; icon: string; values: r
 
 function liveTailChoiceMarkup(key: string, settings: TelegramLiveTailSettings): TelegramSettingsMenuReplyMarkup {
   const choice = LIVE_TAIL_CHOICES[key];
-  const current = key === "interval" ? String(settings.interval ?? 2)
+  const current = key === "style" ? (settings as any).style ?? "hermes"
+    : key === "interval" ? String(settings.interval ?? 2)
     : key === "autoDelete" ? settings.autoDelete ?? "keep"
     : key === "detail" ? settings.detail ?? "standard"
     : key === "reasoning" ? settings.reasoning ?? "collapsed"

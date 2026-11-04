@@ -1324,9 +1324,23 @@ export function getTelegramAuthorizationState(
   if (allowedUserId === undefined) {
     return { kind: "pair", userId };
   }
-  if (userId === allowedUserId) {
+  if (String(userId) === String(allowedUserId)) {
     return { kind: "allow" };
   }
+  try {
+    const fs = require("node:fs");
+    const os = require("node:os");
+    const path = require("node:path");
+    const raw = JSON.parse(fs.readFileSync(path.join(os.homedir(), ".pi", "agent", "telegram.json"), "utf8"));
+    const rootExtra = raw.allowedUserIds;
+    if (Array.isArray(rootExtra) && rootExtra.some((id: any) => String(id) === String(userId)))
+      return { kind: "allow" };
+    for (const profile of Object.values(raw.profiles ?? {}) as any[]) {
+      const extra = profile?.allowedUserIds;
+      if (Array.isArray(extra) && extra.some((id: any) => String(id) === String(userId)))
+        return { kind: "allow" };
+    }
+  } catch {}
   return { kind: "deny" };
 }
 

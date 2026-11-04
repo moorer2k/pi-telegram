@@ -2537,7 +2537,11 @@ export default function (pi) {
         },
         onSessionStarted(_event, ctx) {
             liveTailConsumer?.dispose();
-            liveTailConsumer = registerLiveTailConsumer(() => ({ ...configControls.getLiveTailSettings(), enabled: configControls.getLiveTailSettings().enabled === true || process.env.PI_TELEGRAM_LIVE_TAIL === "1" }));
+            liveTailConsumer = registerLiveTailConsumer(() => ({
+                ...configControls.getLiveTailSettings(),
+                enabled: configControls.getLiveTailSettings().enabled === true || process.env.PI_TELEGRAM_LIVE_TAIL === "1",
+                model: currentModelRuntime.getStored()?.id ?? currentModelRuntime.getStored()?.name ?? "rvn-q4-km-mtp",
+            }));
             sessionActionAssembly.settlement.onSessionStart(ctx);
         },
         buttonActionStore,

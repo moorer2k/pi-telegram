@@ -50,6 +50,23 @@ export type TelegramActivityPayload = {
     result: unknown;
     isError: boolean;
 } | {
+    type: "child-work-start";
+    workId: string;
+    kind: "subagent" | "background";
+    label?: string;
+    parentToolCallId?: string;
+    timestamp: number;
+} | {
+    type: "child-work-update";
+    workId: string;
+    message?: string;
+} | {
+    type: "child-work-end";
+    workId: string;
+    isError?: boolean;
+    result?: string;
+    timestamp: number;
+} | {
     type: "compaction-start";
     reason: "manual" | "threshold" | "overflow" | "unknown";
 } | {
@@ -62,10 +79,48 @@ export type TelegramActivityPayload = {
 } | {
     type: "ui-prompt-end";
 } | {
+    type: "child-work-start";
+    workId: string;
+    kind: "subagent" | "background";
+    label: string;
+    parentToolCallId?: string;
+} | {
+    type: "child-work-update";
+    workId: string;
+    message: string;
+} | {
+    type: "child-work-end";
+    workId: string;
+    isError: boolean;
+    result?: string;
+} | {
     type: "agent-end";
 } | {
     type: "agent-settled";
 };
+/**
+ * Explicit lifecycle metadata for cooperating Pi tools. No child work is inferred
+ * from tool names or arbitrary output text.
+ *
+ * A tool may expose `liveTailChildWork` on its args, partial result or result,
+ * or inside the result's `details` object.
+ */
+export type TelegramChildWorkSignal = {
+    phase: "start";
+    workId: string;
+    kind: "subagent" | "background";
+    label: string;
+} | {
+    phase: "update";
+    workId: string;
+    message: string;
+} | {
+    phase: "end";
+    workId: string;
+    isError: boolean;
+    result?: string;
+};
+export declare function readTelegramChildWorkSignal(value: unknown): TelegramChildWorkSignal | undefined;
 export type TelegramActivityEvent = TelegramActivityEnvelope & TelegramActivityPayload;
 export type TelegramAssistantSegmentEvent = TelegramActivityEnvelope & Extract<TelegramActivityPayload, {
     type: "assistant-segment";
@@ -175,6 +230,21 @@ export interface TelegramActivityRuntime {
         toolName: string;
         result: unknown;
         isError: boolean;
+    }) => void;
+    onChildWorkStart?: (event: {
+        workId: string;
+        kind: "subagent" | "background";
+        label?: string;
+        parentToolCallId?: string;
+    }) => void;
+    onChildWorkUpdate?: (event: {
+        workId: string;
+        message?: string;
+    }) => void;
+    onChildWorkEnd?: (event: {
+        workId: string;
+        isError?: boolean;
+        result?: string;
     }) => void;
     onCompactionStart: (reason: "manual" | "threshold" | "overflow" | "unknown") => void;
     onCompactionEnd: (reason: "manual" | "threshold" | "overflow" | "unknown") => void;

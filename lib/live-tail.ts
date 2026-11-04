@@ -26,6 +26,7 @@ export interface LiveTailSnapshot {
   reasoning: string;
   earlierReasoning: string;
   plan: string;
+  previewText?: string;
   tools: LiveTailTool[];
   childWork: LiveTailTool[];
   totalChildWork: number;
@@ -37,6 +38,7 @@ export interface LiveTailSnapshot {
   settled: boolean;
   phase: "running" | "compacting" | "awaiting-input" | "finished";
   prompt?: string;
+  model?: string;
   updatedAt: number;
   startedAt: number;
   totalTools: number;
@@ -188,7 +190,7 @@ export function createLiveTailProjection(activityId: string) {
         snapshot.totalChildWork++;
         if (event.kind === "subagent") snapshot.subagentWorkTotal++;
         else snapshot.backgroundWorkTotal++;
-        snapshot.childWork.push({ id: event.workId, name: safeText(event.label, 70) || event.kind, kind: event.kind, parentToolCallId: event.parentToolCallId, startedAt: event.timestamp, state: "running" });
+        snapshot.childWork.push({ id: event.workId, name: safeText(event.label ?? "", 70) || event.kind, kind: event.kind, parentToolCallId: event.parentToolCallId, startedAt: event.timestamp, state: "running" });
         let finishedChildren = snapshot.childWork.reduce((count, child) => count + (child.state !== "running" ? 1 : 0), 0);
         while (finishedChildren > MAX_CHILD_HISTORY) {
           const oldestFinished = snapshot.childWork.findIndex(t => t.state !== "running");
@@ -205,7 +207,7 @@ export function createLiveTailProjection(activityId: string) {
       case "child-work-update": {
         if (endedChildIds.has(event.workId)) break;
         const child = snapshot.childWork.find(t => t.id === event.workId && t.state === "running");
-        if (child) child.update = safeText(event.message, 120) || child.update;
+        if (child) child.update = safeText(event.message ?? "", 120) || child.update;
         break;
       }
       case "child-work-end": {
@@ -216,7 +218,7 @@ export function createLiveTailProjection(activityId: string) {
         if (child) {
           child.state = event.isError ? "error" : "done";
           child.elapsedMs = Math.max(0, event.timestamp - child.startedAt);
-          child.result = event.result ? safeText(event.result, 120) : undefined;
+          child.result = event.result ? safeText(event.result ?? "", 120) : undefined;
         }
         let completedHistory = snapshot.childWork.reduce((n, t) => n + (t.state !== "running" ? 1 : 0), 0);
         while (completedHistory > MAX_CHILD_HISTORY) {
@@ -290,86 +292,155 @@ export function escapeTelegramHtml(text: string): string {
  * Never truncate already-escaped markup or cut through an HTML entity/tag.
  */
 export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiveTailSettings = {}): string {
-  const detail = settings.detail ?? "standard";
-  const reasoningMode = settings.reasoning ?? "collapsed";
-  const parts: string[] = [];
-  const budget = 3800;
-  let used = 0;
-  const add = (section: string) => {
-    const cost = section.length + (parts.length ? 2 : 0);
-    if (used + cost > budget) return false;
-    parts.push(section);
-    used += cost;
-    return true;
-  };
-  const clean = (value: string, max: number) => escapeTelegramHtml(value.slice(0, max));
-  const safeClean = (value: string, max: number) => clean(safePreview(value, max) ?? "", max);
-  const elapsedSeconds = Number.isFinite(snapshot.updatedAt - snapshot.startedAt)
-    ? Math.max(0, Math.floor((snapshot.updatedAt - snapshot.startedAt) / 1000)) : 0;
-  const safeDuration = (ms: number) => Number.isFinite(ms) && ms >= 0 ? (ms / 1000).toFixed(1) + "s" : "0.0s";
-  const expandable = (value: string) => "<blockquote expandable>" + value + "</blockquote>";
-  const phaseStatus = snapshot.settled ? (snapshot.failedTools || snapshot.failedChildWork ? "Finished with errors" : snapshot.interruptedTools || snapshot.interruptedChildWork ? "Interrupted" : "Completed")
-    : snapshot.phase === "awaiting-input" ? "Awaiting input" : snapshot.phase === "compacting" ? "Compacting context" : "Working";
-  const tools = snapshot.tools;
-  const active = tools.filter(t => t.state === "running");
-  const hiddenActiveCount = Math.max(0, snapshot.totalTools - snapshot.completedTools - snapshot.failedTools - snapshot.interruptedTools - active.length);
-  const activeCount = Math.max(0, snapshot.totalTools - snapshot.completedTools - snapshot.failedTools - snapshot.interruptedTools);
-  const jobs = active.filter(t => t.kind === "subagent" || t.kind === "background" || t.kind === "task");
-  const activeChildren = snapshot.childWork.filter(t => t.state === "running");
-  const childActiveCount = Math.max(0, snapshot.totalChildWork - snapshot.completedChildWork - snapshot.failedChildWork - snapshot.interruptedChildWork);
-  const hiddenChildren = Math.max(0, childActiveCount - activeChildren.length);
-  const finished = tools.filter(t => t.state !== "running");
-  const line = (tool: LiveTailTool, compact = false) => {
-    const status = tool.state === "running" ? "[RUN]" : tool.state === "error" ? "[ERR]" : tool.state === "interrupted" ? "[STOP]" : "[OK]";
-    const command = tool.command ? " " + safeClean(tool.command, compact ? 90 : 160) : "";
-    const update = !compact && tool.update ? "\n" + safeClean(tool.update, 90) : "";
-    const duration = tool.elapsedMs === undefined ? "" : " (" + safeDuration(tool.elapsedMs) + ")";
-    const result = !compact && tool.state !== "running" && tool.result ? "\n" + safeClean(tool.result, 90) : "";
-    return status + " <code>" + (safeClean(tool.name, 50) || "tool") + command + "</code>" + duration + update + result;
-  };
-  if (detail === "detailed") add("<b>VENOM // LIVE TAIL</b>");
-  if (snapshot.phase === "compacting") add("<b>SESSION</b>\nCompacting context");
-  if (snapshot.phase === "awaiting-input") add("<b>AWAITING INPUT</b>\n" + (safeClean(snapshot.prompt ?? "User input", 120) || "Input requested"));
-  if (!snapshot.settled && active.length && settings.tools !== "hidden") {
-    const current = active.slice(-2);
-    add("<b>ACTIVE OPERATIONS</b>\n" + current.map(t => line(t)).join("\n") + (active.length > current.length ? "\n+" + (active.length - current.length) + " other active" : "") + (hiddenActiveCount ? "\n+" + hiddenActiveCount + " untracked in visible history" : ""));
-  } else {
-    add("<b>CURRENT STATUS</b>\n" + phaseStatus);
-  }
-  if (settings.tools !== "hidden" && (snapshot.totalChildWork > 0)) {
-    const childStatus = "<b>CHILD WORK</b>\n" + snapshot.completedChildWork + " done / " + childActiveCount + " active" + " / " + snapshot.subagentWorkTotal + " subagents total / " + snapshot.backgroundWorkTotal + " background total" + (snapshot.failedChildWork ? " / " + snapshot.failedChildWork + " errors" : "") + (snapshot.interruptedChildWork ? " / " + snapshot.interruptedChildWork + " interrupted" : "");
-    const visibleChildren = activeChildren.slice(-3).map(t => line(t, false));
-    add(childStatus + (visibleChildren.length ? "\n" + visibleChildren.join("\n") : "") + (hiddenChildren ? "\n+" + hiddenChildren + " other active child jobs" : ""));
-  }
-  if (settings.tools !== "hidden" && settings.tools !== "active" && detail !== "minimal") {
-    const finishedChildren = snapshot.childWork.filter(t => t.state !== "running");
-    if (finishedChildren.length) {
-      const recentChildren = finishedChildren.slice(-(detail === "detailed" ? 4 : 2));
-      add("<b>RECENT CHILD WORK</b>\n" + recentChildren.map(t => line(t, detail !== "detailed")).join("\n"));
+    const s = snapshot;
+    const cfg = settings as any;
+    const esc = (v: unknown, max: number): string => escapeTelegramHtml(String(v ?? "").slice(0, max));
+    const safeEsc = (v: unknown, max: number): string => esc(safePreview(v as string, max) ?? "", max);
+
+    // Format tool arguments according to tool type (never mutilate shell commands)
+    const formatToolTarget = (toolName: string, raw: unknown): string => {
+        const text = String(raw ?? "").trim();
+        if (!text) return "";
+        const isShell = /bash|terminal|exec|shell|sh/i.test(toolName);
+        if (isShell) {
+            // Keep full shell command from the beginning, clean excess whitespace
+            const clean = text.replace(/\s+/g, " ");
+            return clean.length > 105 ? clean.slice(0, 102) + "…" : clean;
+        }
+        const isFile = /read|write|edit|patch/i.test(toolName);
+        if (isFile && /[/\\]/.test(text)) {
+            // File path: shorten leading directory tree
+            const parts = text.split(/[/\\]/).filter(Boolean);
+            return parts.length <= 2 ? parts.join("/") : "…/" + parts.slice(-2).join("/");
+        }
+        const clean = text.replace(/\s+/g, " ");
+        return clean.length > 90 ? clean.slice(0, 87) + "…" : clean;
+    };
+
+    const tools: LiveTailTool[] = Array.isArray(s.tools) ? s.tools : [];
+    const active = tools.filter(t => t.state === "running");
+    const finished = tools.filter(t => t.state !== "running");
+    interface LiveTailRow {
+        name: string;
+        target: string;
+        count: number;
+        state: string;
+        ms?: number;
     }
-  }
-  if (!snapshot.settled && detail !== "minimal" && settings.tools !== "hidden" && jobs.length > 2) add("<b>ONGOING TASKS</b>\n" + jobs.slice(-4).map(t => safeClean(t.name, 50) || "tool").join("\n"));
-  if (detail !== "minimal" && snapshot.plan) {
-    add("<b>CURRENT TASK</b>\n" + safeClean(snapshot.plan.slice(-200), 200));
-  }
-  const done = snapshot.completedTools;
-  const errors = snapshot.failedTools;
-  const interrupted = snapshot.interruptedTools;
-  add("<b>STATUS</b>\n" + done + " done / " + activeCount + " active" + (errors ? " / " + errors + " errors" : "") + (interrupted ? " / " + interrupted + " interrupted" : "") + " / " + elapsedSeconds + "s");
-  if (settings.tools !== "hidden" && settings.tools !== "active" && finished.length) {
-    const recent = finished.slice(-(detail === "detailed" ? 5 : 2));
-    add("<b>RECENT OPERATIONS</b>\n" + recent.map(t => line(t, detail !== "detailed")).join("\n"));
-    if (detail === "detailed" && finished.length > 2) {
-      const history = finished.slice(-17, -5);
-      if (history.length) add("<i>Earlier operations (" + history.length + ")</i>\n" + expandable(history.map(t => line(t, true)).join("\n")));
+    const rows: LiveTailRow[] = [];
+    for (const t of [...finished, ...active]) {
+        const name = safeEsc(t.name, 32) || "tool";
+        const rawTarget = t.command ?? t.update ?? "";
+        const target = safeEsc(formatToolTarget(t.name, rawTarget), 110);
+        const last: LiveTailRow | undefined = rows[rows.length - 1];
+        if (last && last.name === name && last.target === target && last.state === t.state) {
+            last.count += 1;
+            if (typeof t.elapsedMs === "number")
+                last.ms = Math.max(last.ms ?? 0, t.elapsedMs);
+            continue;
+        }
+        rows.push({
+            name,
+            target,
+            count: 1,
+            state: t.state,
+            ms: typeof t.elapsedMs === "number" ? t.elapsedMs : undefined,
+        });
     }
-  }
-  if (reasoningMode !== "hidden" && snapshot.reasoning && detail !== "minimal") {
-    const summary = safeClean(snapshot.reasoning.slice(-240), 240);
-    add("<b>REASONING</b>\n" + (reasoningMode === "expanded" ? summary : expandable(summary)));
-  }
-  if (reasoningMode !== "hidden" && detail === "detailed" && snapshot.earlierReasoning) {
-    add("<i>Earlier reasoning</i>\n" + expandable(safeClean(snapshot.earlierReasoning.slice(-350), 350)));
-  }
-  return parts.join("\n\n");
+
+    const span = Number.isFinite(s.updatedAt - s.startedAt)
+        ? Math.max(0, Math.floor((s.updatedAt - s.startedAt) / 1000)) : 0;
+    const elapsed = span >= 60 ? `${Math.floor(span / 60)}m ${span % 60}s` : `${span}s`;
+
+    const MAX_CURRENT = 5;
+    const prevRows = rows.length > MAX_CURRENT ? rows.slice(0, rows.length - MAX_CURRENT) : [];
+    const currRows = rows.length > MAX_CURRENT ? rows.slice(rows.length - MAX_CURRENT) : rows;
+
+    const parts: string[] = [];
+
+    // 0. Delegates / Sub-agents Section (Hermes native tree style)
+    const childWork: LiveTailTool[] = Array.isArray(s.childWork) ? s.childWork : [];
+    if (childWork.length > 0) {
+        parts.push("<b><u>Delegates</u></b>");
+        const formatDelegateItem = (child: LiveTailTool): string => {
+            const mark = child.state === "running" ? "→" : child.state === "error" ? "❌" : "✓";
+            const dur = child.elapsedMs !== undefined && child.elapsedMs >= 50
+                ? ` · ${(child.elapsedMs / 1000).toFixed(1)}s`
+                : "";
+            const stateText = child.state === "running" ? " · running" : ` · done${dur}`;
+            const labelText = child.name ? `: <i>${esc(child.name, 60)}</i>` : "";
+            let itemStr = `• ${mark} <b>Subagent</b>${labelText}${stateText}`;
+            if (child.update && child.state === "running") {
+                itemStr += `\n  └─ <code>${esc(child.update, 80)}</code>`;
+            } else if (child.result && child.state !== "running") {
+                itemStr += `\n  └─ <i>${esc(child.result, 80)}</i>`;
+            }
+            return itemStr;
+        };
+
+        const activeChildren = childWork.filter(c => c.state === "running");
+        const finishedChildren = childWork.filter(c => c.state !== "running");
+        const allChildren = [...finishedChildren, ...activeChildren];
+
+        const MAX_CURRENT_CHILDREN = 3;
+        const prevChildren = allChildren.length > MAX_CURRENT_CHILDREN
+            ? allChildren.slice(0, allChildren.length - MAX_CURRENT_CHILDREN)
+            : [];
+        const currChildren = allChildren.length > MAX_CURRENT_CHILDREN
+            ? allChildren.slice(allChildren.length - MAX_CURRENT_CHILDREN)
+            : allChildren;
+
+        if (prevChildren.length > 0) {
+            parts.push(`<blockquote expandable><b><u>Previous delegates</u> (${prevChildren.length}) · tap to expand</b>\n${prevChildren.map(formatDelegateItem).join("\n")}</blockquote>`);
+        }
+        parts.push(currChildren.map(formatDelegateItem).join("\n"));
+    }
+
+    // 1. Tools Section (Clean bold header, bullet items, no ## or emoji junk)
+    if (cfg.tools !== "hidden" && rows.length > 0) {
+        parts.push("<b><u>Tools</u></b>");
+
+        const formatHermesItem = (r: LiveTailRow): string => {
+            const icon = r.state === "error" ? "❌" : r.state === "running" ? "→" : "✅";
+            const dur = r.ms !== undefined && r.ms >= 50 ? ` · ${(r.ms / 1000).toFixed(1)}s` : "";
+            const count = r.count > 1 ? ` ×${r.count}` : "";
+            const statusText = r.state === "running" ? " · running" : r.state === "error" ? ` · failed${dur}` : ` · done${dur}`;
+            const targetText = r.target ? `: <code>${r.target}</code>` : "";
+            return `• ${icon} <b>${r.name}</b>${targetText}${count}${statusText}`;
+        };
+
+        if (prevRows.length > 0) {
+            parts.push(`<blockquote expandable><b><u>Previous tools</u> (${prevRows.length}) · tap to expand</b>\n${prevRows.map(formatHermesItem).join("\n")}</blockquote>`);
+        }
+
+        parts.push(currRows.map(formatHermesItem).join("\n"));
+    } else if (!s.settled) {
+        parts.push("<b><u>Tools</u></b>\n• → <i>working...</i>");
+    }
+
+    // 2. Reasoning Section (Native expandable dropdown)
+    if (cfg.reasoning !== "hidden") {
+        const combined = [s.earlierReasoning, s.reasoning]
+            .filter((v: unknown) => typeof v === "string" && (v as string).trim())
+            .join("\n")
+            .replace(/[ \t]+/g, " ")
+            .trim();
+        if (combined) {
+            const tail = combined.length > 900 ? combined.slice(-900) : combined;
+            parts.push(`<blockquote expandable><b><u>Reasoning</u> · tap to expand</b>\n${esc(tail, 900)}</blockquote>`);
+        }
+    }
+
+    // 3. Status Section (Clean bold header, compact summary)
+    const completedCount = s.completedTools ?? finished.length;
+    const runningChildren = childWork.filter(c => c.state === "running").length;
+    const runningCount = active.length + runningChildren;
+    const modelLabel = cfg.model || (s as any).model || "rvn-q4-km-mtp";
+    const statusText = s.settled
+        ? `${completedCount} done · ${modelLabel} · ~/pi-work · ${elapsed}`
+        : `${completedCount} done${runningCount ? ` · ${runningCount} running` : ""} · ${modelLabel} · ~/pi-work · ${elapsed}`;
+
+    parts.push(`<b><u>Status</u></b>\n${statusText}`);
+
+    return parts.join("\n\n");
 }
