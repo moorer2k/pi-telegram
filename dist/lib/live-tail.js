@@ -273,6 +273,11 @@ export function escapeTelegramHtml(text) {
 export function renderLiveTail(snapshot, settings = {}) {
     const s = snapshot;
     const cfg = settings;
+    const pad = (n) => String(n).padStart(2, "0");
+    const formatTime = (ts) => {
+        const d = new Date(ts);
+        return `[${pad(d.getHours())}:${pad(d.getMinutes())}]`;
+    };
     const formatToolTarget = (toolName, raw) => {
         const text = String(raw ?? "").trim();
         if (!text)
@@ -280,7 +285,7 @@ export function renderLiveTail(snapshot, settings = {}) {
         const isShell = /bash|terminal|exec|shell|sh/i.test(toolName);
         if (isShell) {
             const clean = text.replace(/\s+/g, " ");
-            return clean.length > 100 ? clean.slice(0, 97) + "…" : clean;
+            return clean.length > 95 ? clean.slice(0, 92) + "…" : clean;
         }
         const isFile = /read|write|edit|patch/i.test(toolName);
         if (isFile && /[/\\]/.test(text)) {
@@ -288,115 +293,50 @@ export function renderLiveTail(snapshot, settings = {}) {
             return parts.length <= 2 ? parts.join("/") : "…/" + parts.slice(-2).join("/");
         }
         const clean = text.replace(/\s+/g, " ");
-        return clean.length > 85 ? clean.slice(0, 82) + "…" : clean;
+        return clean.length > 80 ? clean.slice(0, 77) + "…" : clean;
     };
     const tools = Array.isArray(s.tools) ? s.tools : [];
-    const active = tools.filter(t => t.state === "running");
-    const finished = tools.filter(t => t.state !== "running");
-    const rows = [];
-    for (const t of [...finished, ...active]) {
-        const name = String(t.name ?? "tool").trim() || "tool";
-        const rawTarget = t.command ?? t.update ?? "";
-        const target = formatToolTarget(t.name, rawTarget);
-        const last = rows[rows.length - 1];
-        if (last && last.name === name && last.target === target && last.state === t.state) {
-            last.count += 1;
-            if (typeof t.elapsedMs === "number")
-                last.ms = Math.max(last.ms ?? 0, t.elapsedMs);
-            continue;
-        }
-        rows.push({
-            name,
-            target,
-            count: 1,
-            state: t.state,
-            ms: typeof t.elapsedMs === "number" ? t.elapsedMs : undefined,
-        });
-    }
     const span = Number.isFinite(s.updatedAt - s.startedAt)
         ? Math.max(0, Math.floor((s.updatedAt - s.startedAt) / 1000)) : 0;
     const elapsed = span >= 60 ? `${Math.floor(span / 60)}m ${span % 60}s` : `${span}s`;
-    const completedCount = s.completedTools ?? finished.length;
-    const childWork = Array.isArray(s.childWork) ? s.childWork : [];
-    const runningChildren = childWork.filter(c => c.state === "running").length;
-    const runningCount = active.length + runningChildren;
     const modelLabel = cfg.model || s.model || "rvn-q4-km-mtp";
     const combinedReasoning = [s.earlierReasoning, s.reasoning]
         .filter((v) => typeof v === "string" && v.trim())
-        .join("\n")
-        .replace(/[ \t]+/g, " ")
+        .join("\n\n")
         .trim();
-    const reasoningTail = combinedReasoning.length > 900 ? combinedReasoning.slice(-900) : combinedReasoning;
-    const activeRow = rows.filter(r => r.state === "running").pop();
-    const finishedRows = rows.filter(r => r.state !== "running");
     const parts = [];
-    // 1. Header (Big font in Telegram rich message)
-    parts.push("## Venom is working");
-    // 2. Telemetry GFM Table (Bordered & Striped in Telegram rich message)
-    const nowText = activeRow ? `${activeRow.name}: ${activeRow.target || "running"}` : s.settled ? "completed" : "reasoning";
-    const whyText = reasoningTail ? reasoningTail.slice(0, 50).replace(/\n/g, " ") + (reasoningTail.length > 50 ? "…" : "") : "analyzing request";
-    const stateText = `${completedCount} done${runningCount ? ` · ${runningCount} running` : ""}`;
-    parts.push("| Field | Value |\n" +
-        "|:--|:--|\n" +
-        `| **Now** | ${nowText} |\n` +
-        `| **Why** | ${whyText} |\n` +
-        `| **State** | ${stateText} |\n` +
-        `| **Time** | ${elapsed} |`);
-    // 3. Tools Section (Big font '## Tools', native list items with '- ')
-    if (cfg.tools !== "hidden" && rows.length > 0) {
-        parts.push("## Tools");
-        const toolLines = [];
-        // If there's an active running tool, show it at top with →
-        if (activeRow) {
-            const dur = activeRow.ms !== undefined && activeRow.ms >= 100 ? ` · ${(activeRow.ms / 1000).toFixed(1)}s` : "";
-            const targetText = activeRow.target ? `: \`${activeRow.target}\`` : "";
-            toolLines.push(`- → **${activeRow.name}**${targetText} · running${dur}`);
+    // 1. Reasoning Section (Large heading '## Reasoning')
+    if (cfg.reasoning !== "hidden" && combinedReasoning) {
+        const reasoningTail = combinedReasoning.length > 900 ? combinedReasoning.slice(-900) : combinedReasoning;
+        parts.push(`## Reasoning\n\n${reasoningTail}`);
+    }
+    // 2. Tools Section (Large heading '## Tools', bullet lines matching Hermes)
+    if (cfg.tools !== "hidden" && tools.length > 0) {
+        const lines = [];
+        const MAX_TOOLS = 6;
+        const visibleTools = tools.slice(-MAX_TOOLS);
+        for (const t of visibleTools) {
+            const timeStr = formatTime(t.startedAt || Date.now());
+            const mark = t.state === "running" ? "→" : t.state === "error" ? "❌" : "✓";
+            const dur = typeof t.elapsedMs === "number" && t.elapsedMs >= 50
+                ? ` · ${(t.elapsedMs / 1000).toFixed(1)}s`
+                : "";
+            const statusText = t.state === "running" ? " · running" : ` · done${dur}`;
+            const target = formatToolTarget(t.name, t.command ?? t.update ?? "");
+            const targetText = target ? `: ${target}` : "";
+            lines.push(`- • ${timeStr} ${mark} ${t.name}${targetText}${statusText}`);
         }
-        // Show up to the last 3 completed tools
-        const MAX_RECENT = 3;
-        const visibleFinished = finishedRows.slice(-MAX_RECENT);
-        const collapsedFinished = finishedRows.slice(0, -MAX_RECENT);
-        const formatHermesRichItem = (r) => {
-            const mark = r.state === "error" ? "❌" : "✓";
-            const dur = r.ms !== undefined && r.ms >= 50 ? ` · ${(r.ms / 1000).toFixed(1)}s` : "";
-            const count = r.count > 1 ? ` ×${r.count}` : "";
-            const targetText = r.target ? `: \`${r.target}\`` : "";
-            return `- ${mark} **${r.name}**${targetText}${count}${dur}`;
-        };
-        for (const r of visibleFinished) {
-            toolLines.push(formatHermesRichItem(r));
-        }
-        if (toolLines.length > 0) {
-            parts.push(toolLines.join("\n"));
-        }
-        // 4. Tool Archive Dropdown (Native Telegram <details> accordion)
-        if (collapsedFinished.length > 0) {
-            parts.push(`<details><summary>📁 <b>Tool Archive (${collapsedFinished.length} historical calls)</b></summary>\n\n` +
-                collapsedFinished.map(formatHermesRichItem).join("\n") +
-                "\n</details>");
+        if (lines.length > 0) {
+            parts.push(`## Tools\n\n${lines.join("\n")}`);
         }
     }
     else if (!s.settled) {
-        parts.push("## Tools\n\n- → *working...*");
+        const timeStr = formatTime(Date.now());
+        parts.push(`## Tools\n\n- • ${timeStr} → working...`);
     }
-    // 5. Delegates Dropdown (Native Telegram <details> accordion)
-    if (childWork.length > 0) {
-        const formatDelegate = (c) => {
-            const mark = c.state === "running" ? "→" : c.state === "error" ? "❌" : "✓";
-            const dur = c.elapsedMs !== undefined && c.elapsedMs >= 50 ? ` · ${(c.elapsedMs / 1000).toFixed(1)}s` : "";
-            return `- ${mark} **Subagent**${c.name ? `: *${c.name}*` : ""}${dur}`;
-        };
-        parts.push(`<details><summary>👥 <b>Delegates (${childWork.length})</b></summary>\n\n` +
-            childWork.map(formatDelegate).join("\n") +
-            "\n</details>");
-    }
-    // 6. Reasoning Dropdown (Native Telegram <details> accordion)
-    if (cfg.reasoning !== "hidden" && reasoningTail) {
-        parts.push(`<details><summary>🧠 <b>Reasoning</b></summary>\n\n` +
-            reasoningTail +
-            "\n</details>");
-    }
-    // 7. Status Heading & Telemetry
-    parts.push(`## Status\n\n${completedCount} completed · \`${modelLabel}\` · \`${elapsed}\``);
+    // 3. Status Section (Large heading '## Status', exact Hermes footer format)
+    const ctxLabel = "ctx 2%";
+    const statusLine = `${ctxLabel} · compacted 0x · ${modelLabel} · git main · ~/.pi/work · live_tail · ${elapsed}`;
+    parts.push(`## Status\n\n${statusLine}`);
     return parts.join("\n\n");
 }
