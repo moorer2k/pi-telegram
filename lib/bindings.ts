@@ -1609,7 +1609,7 @@ export function registerTelegramLifecycleRuntimeHooks({
     const target = selectedTarget ? { ...selectedTarget } : undefined;
     const replyToMessageId = turn?.replyToMessageId;
     return async () => {
-      if (!target || !isSessionContextActive(ctx) || !authority.isCurrent())
+      if (!target || !isTurnOrSessionActive(ctx) || !authority.isCurrent())
         return;
       if (turn && isTurnTransportActive?.(turn) === false) return;
       try {
@@ -1628,7 +1628,7 @@ export function registerTelegramLifecycleRuntimeHooks({
     scheduleActiveTurnDelivery(prepareCompactionNotice(text, ctx));
   };
   const compactionObserver = Lifecycle.createTelegramCompactionObserverRuntime({
-    isContextActive: isSessionContextActive,
+    isContextActive: isTurnOrSessionActive,
     setCompactionInProgress: lifecycle.setCompactionInProgress,
     updateStatus,
     startTypingLoop: startAgentActivityTypingLoop,
@@ -1724,7 +1724,7 @@ export function registerTelegramLifecycleRuntimeHooks({
       } catch (_) {}
     },
     async onSessionCompact(event, ctx) {
-      if (!isSessionContextActive(ctx)) return;
+      if (!isTurnOrSessionActive(ctx)) return;
       activityRuntime.onCompactionEnd(Pi.getSessionCompactionReason(event));
       compactionObserver.onSessionCompact(event, ctx);
       if (observedAutomaticCompaction) {
@@ -1736,7 +1736,7 @@ export function registerTelegramLifecycleRuntimeHooks({
       }
     },
     async onSessionCompactFailed(event, ctx) {
-      if (!isSessionContextActive(ctx)) return;
+      if (!isTurnOrSessionActive(ctx)) return;
       const shouldNotify = observedAutomaticCompaction;
       compactionObserver.onSessionCompactFailed(event, ctx);
       if (!shouldNotify) return;
@@ -1818,11 +1818,11 @@ export function registerTelegramLifecycleRuntimeHooks({
       agentLifecycleHooks.onToolExecutionEnd(event, ctx);
     },
     async onMessageStart(event, ctx) {
-      if (!isSessionContextActive(ctx)) return;
+      if (!isTurnOrSessionActive(ctx)) return;
       await messageActivityHooks.onMessageStart(event, ctx);
     },
     async onMessageUpdate(event, ctx) {
-      if (!isSessionContextActive(ctx)) return;
+      if (!isTurnOrSessionActive(ctx)) return;
       if (event.assistantMessageEvent) {
         activityRuntime.onAssistantEvent(
           event.assistantMessageEvent as Activity.TelegramAssistantStreamEvent,
@@ -1831,7 +1831,7 @@ export function registerTelegramLifecycleRuntimeHooks({
       await messageActivityHooks.onMessageUpdate(event, ctx);
     },
     onMessageEnd(event, ctx) {
-      if (!isSessionContextActive(ctx)) return;
+      if (!isTurnOrSessionActive(ctx)) return;
       if (event.message.role === "assistant") {
         previewRuntime.seal();
         activityRuntime.onAssistantMessageEnd(event.message.stopReason);
@@ -1861,14 +1861,14 @@ export function registerTelegramLifecycleRuntimeHooks({
       };
     },
     onUiPromptStart(event, ctx) {
-      if (!isSessionContextActive(ctx)) return;
+      if (!isTurnOrSessionActive(ctx)) return;
       uiPromptActive = true;
       typing.stop();
       activityRuntime.onUiPromptStart(event.kind, event.title);
       updateStatus(ctx);
     },
     onUiPromptEnd(_event, ctx) {
-      if (!isSessionContextActive(ctx)) return;
+      if (!isTurnOrSessionActive(ctx)) return;
       uiPromptActive = false;
       activityRuntime.onUiPromptEnd();
       if (agentWorkActive || lifecycle.isCompactionInProgress()) {
@@ -1877,7 +1877,7 @@ export function registerTelegramLifecycleRuntimeHooks({
       updateStatus(ctx);
     },
     async onAgentEnd(event, ctx) {
-      if (!isSessionContextActive(ctx)) return;
+      if (!isTurnOrSessionActive(ctx)) return;
       if (
         pendingFinalPublication &&
         pendingFinalPublication.turn !== activeTurnRuntime.get()
@@ -1889,7 +1889,7 @@ export function registerTelegramLifecycleRuntimeHooks({
       await agentLifecycleHooks.onAgentEnd(event, ctx);
     },
     async onAgentSettled(event, ctx) {
-      if (!isSessionContextActive(ctx)) return;
+      if (!isTurnOrSessionActive(ctx)) return;
       const pending = pendingFinalPublication;
       try {
         await agentLifecycleHooks.onAgentSettled(event, ctx);
@@ -1897,7 +1897,7 @@ export function registerTelegramLifecycleRuntimeHooks({
         if (pendingFinalPublication === pending)
           cancelPendingFinalPublication();
       }
-      if (!isSessionContextActive(ctx)) return;
+      if (!isTurnOrSessionActive(ctx)) return;
       agentWorkActive = false;
       activityRuntime.onAgentSettled();
       modelContextAvailabilityRuntime.reconcile();
