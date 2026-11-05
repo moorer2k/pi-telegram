@@ -2445,11 +2445,13 @@ export function createTelegramLockedPollingRuntime<
       const canRestoreRememberedFollower =
         state?.kind === "active-elsewhere" &&
         deps.restoreFollowerWithOwner !== undefined;
+      const canClaimInactive = !state || state.kind === "inactive";
       if (
         !ownsCurrentLock &&
         !canResumeStaleSameCwd &&
         !canHandoffSameProcess &&
-        !canRestoreRememberedFollower
+        !canRestoreRememberedFollower &&
+        !canClaimInactive
       ) {
         return;
       }
@@ -2493,7 +2495,7 @@ export function createTelegramLockedPollingRuntime<
           );
           return;
         }
-        if (canResumeStaleSameCwd || canHandoffSameProcess) {
+        if (canResumeStaleSameCwd || canHandoffSameProcess || canClaimInactive) {
           const acquired = deps.lock.acquire(
             ctx,
             canHandoffSameProcess

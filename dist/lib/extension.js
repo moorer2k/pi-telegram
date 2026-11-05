@@ -2541,11 +2541,16 @@ export default function (pi) {
         onSessionStarted(_event, ctx) {
             liveTailConsumer?.dispose();
             liveTailConsumer = registerLiveTailConsumer(() => {
-                const usage = ctx.getContextUsage?.();
-                const branch = ctx.sessionManager?.getBranch?.() ?? [];
-                const compactions = Array.isArray(branch)
-                    ? branch.filter((e) => e.type === "compaction").length
-                    : 0;
+                let usage;
+                let compactions = 0;
+                try {
+                    usage = ctx?.getContextUsage?.();
+                    const branch = ctx?.sessionManager?.getBranch?.() ?? [];
+                    compactions = Array.isArray(branch)
+                        ? branch.filter((e) => e.type === "compaction").length
+                        : 0;
+                }
+                catch (_) { }
                 return {
                     ...configControls.getLiveTailSettings(),
                     enabled: configControls.getLiveTailSettings().enabled === true ||
@@ -2555,7 +2560,7 @@ export default function (pi) {
                         "rvn-q4-km-mtp",
                     contextUsage: usage,
                     compactionCount: compactions,
-                    cwd: ctx.cwd,
+                    cwd: ctx?.cwd,
                 };
             });
             sessionActionAssembly.settlement.onSessionStart(ctx);

@@ -3121,11 +3121,15 @@ export default function (pi: Pi.ExtensionAPI) {
     onSessionStarted(_event, ctx) {
       liveTailConsumer?.dispose();
       liveTailConsumer = registerLiveTailConsumer(() => {
-        const usage = (ctx as any).getContextUsage?.();
-        const branch = (ctx as any).sessionManager?.getBranch?.() ?? [];
-        const compactions = Array.isArray(branch)
-          ? branch.filter((e: any) => e.type === "compaction").length
-          : 0;
+        let usage: any;
+        let compactions = 0;
+        try {
+          usage = (ctx as any)?.getContextUsage?.();
+          const branch = (ctx as any)?.sessionManager?.getBranch?.() ?? [];
+          compactions = Array.isArray(branch)
+            ? branch.filter((e: any) => e.type === "compaction").length
+            : 0;
+        } catch (_) {}
         return {
           ...configControls.getLiveTailSettings(),
           enabled:
@@ -3137,7 +3141,7 @@ export default function (pi: Pi.ExtensionAPI) {
             "rvn-q4-km-mtp",
           contextUsage: usage,
           compactionCount: compactions,
-          cwd: (ctx as any).cwd,
+          cwd: (ctx as any)?.cwd,
         } as any;
       });
       sessionActionAssembly.settlement.onSessionStart(ctx);

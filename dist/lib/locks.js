@@ -1772,10 +1772,12 @@ export function createTelegramLockedPollingRuntime(deps) {
                 (!state.lock.cwd || state.lock.cwd === ctx.cwd);
             const canRestoreRememberedFollower = state?.kind === "active-elsewhere" &&
                 deps.restoreFollowerWithOwner !== undefined;
+            const canClaimInactive = !state || state.kind === "inactive";
             if (!ownsCurrentLock &&
                 !canResumeStaleSameCwd &&
                 !canHandoffSameProcess &&
-                !canRestoreRememberedFollower) {
+                !canRestoreRememberedFollower &&
+                !canClaimInactive) {
                 return;
             }
             if (deps.isContextCurrent?.(ctx) === false)
@@ -1808,7 +1810,7 @@ export function createTelegramLockedPollingRuntime(deps) {
                     deps.recordRuntimeEvent?.("bus", "Telegram follower auto-connect completed", { phase: "follower-auto-connect" });
                     return;
                 }
-                if (canResumeStaleSameCwd || canHandoffSameProcess) {
+                if (canResumeStaleSameCwd || canHandoffSameProcess || canClaimInactive) {
                     const acquired = deps.lock.acquire(ctx, canHandoffSameProcess
                         ? { force: true, expectedOwner: state?.lock }
                         : undefined);
