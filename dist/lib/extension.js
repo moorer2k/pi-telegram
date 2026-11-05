@@ -2565,6 +2565,11 @@ export default function (pi) {
             });
             sessionActionAssembly.settlement.onSessionStart(ctx);
             void deliverRestartNotice(sendMessage);
+            if (!lockRuntime.owns()) {
+                lockedPollingRuntime.start(ctx).catch((err) => {
+                    recordRuntimeEvent("connection", err, { phase: "auto-connect-session-start" });
+                });
+            }
         },
         buttonActionStore,
         callMultipart,
