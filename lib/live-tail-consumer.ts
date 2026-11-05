@@ -141,6 +141,9 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
       if (!state.hasContent || text === state.lastText || !text.trim()) {
         // A no-op flush may still have been superseded by a newer event.
         state.dirty = state.revision !== sentRevision;
+        if (!state.settled && !state.timer && !closed && !state.failed) {
+          schedule(id, 2000);
+        }
         return;
       }
       const view = { text, parseMode: "rich" as const };
@@ -229,8 +232,10 @@ export function registerLiveTailConsumer(getSettings: () => TelegramLiveTailSett
       if (state.settled && state.editRetryDeadline !== undefined && Date.now() >= state.editRetryDeadline && state.dirty) {
         retireFailedActivity(id, state);
       }
-      if (state.dirty && !closed && !state.failed && !state.timer) {
-        schedule(id, EDIT_INTERVAL_MS);
+      // While active (not settled) or dirty, keep ticking periodically so elapsed time updates!
+      const shouldKeepTicking = (!state.settled || state.dirty) && !closed && !state.failed && !state.timer;
+      if (shouldKeepTicking) {
+        schedule(id, Math.max(1500, EDIT_INTERVAL_MS));
       }
       if (state.settled && state.finalDelivered) {
         if (state.failed) {

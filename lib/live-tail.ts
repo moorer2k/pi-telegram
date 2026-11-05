@@ -321,8 +321,10 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
     const tools: LiveTailTool[] = Array.isArray(s.tools) ? s.tools : [];
     const childWork: LiveTailTool[] = Array.isArray(s.childWork) ? s.childWork : [];
 
+    const nowMs = Date.now();
     const span = Number.isFinite(s.updatedAt - s.startedAt)
-        ? Math.max(0, Math.floor((s.updatedAt - s.startedAt) / 1000)) : 0;
+        ? Math.max(0, Math.floor((s.updatedAt - s.startedAt) / 1000))
+        : Math.max(0, Math.floor((nowMs - s.startedAt) / 1000));
     const elapsed = span >= 60 ? `${Math.floor(span / 60)}m ${span % 60}s` : `${span}s`;
 
     const modelLabel = cfg.model || (s as any).model || "rvn-q4-km-mtp";
@@ -333,21 +335,28 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
         .trim();
 
     const formatToolLine = (t: LiveTailTool): string => {
-        const timeStr = formatTime(t.startedAt || Date.now());
+        const timeStr = formatTime(t.startedAt || nowMs);
         const mark = t.state === "running" ? "→" : t.state === "error" ? "❌" : "✓";
-        const dur = typeof t.elapsedMs === "number" && t.elapsedMs >= 50
-            ? ` · ${(t.elapsedMs / 1000).toFixed(1)}s`
+        const liveMs = t.state === "running" && t.startedAt ? nowMs - t.startedAt : t.elapsedMs;
+        const dur = typeof liveMs === "number" && liveMs >= 100
+            ? ` · ${(liveMs / 1000).toFixed(1)}s`
             : "";
-        const statusText = t.state === "running" ? " · running" : ` · done${dur}`;
+        const statusText = t.state === "running" ? ` · running${dur}` : ` · done${dur}`;
         const target = formatToolTarget(t.name, t.command ?? t.update ?? "");
         const targetText = target ? `: ${target}` : "";
-        return `- [${timeStr}] ${mark} ${t.name}${targetText}${statusText}`;
+        // Exact single bracket formatting: - [HH:MM] ✓ tool: command ...
+        return `- ${timeStr} ${mark} ${t.name}${targetText}${statusText}`;
     };
 
     const parts: string[] = [];
 
+    // If compacting is in progress, make it front and center
+    if (s.phase === "compacting") {
+        parts.push("## Compacting Session\n\n🗜 *Summarizing conversation history to preserve context space...*");
+    }
+
     // 1. Reasoning Section (Large heading '## Reasoning')
-    if (cfg.reasoning !== "hidden" && combinedReasoning) {
+    if (cfg.reasoning !== "hidden" && combinedReasoning && s.phase !== "compacting") {
         const reasoningTail = combinedReasoning.length > 1200 ? combinedReasoning.slice(-1200) : combinedReasoning;
         if (tools.length > 0) {
             parts.push(`<details><summary>🧠 <b>Reasoning History</b></summary>\n\n${reasoningTail}\n</details>`);
@@ -373,20 +382,21 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
                 "\n</details>"
             );
         }
-    } else if (!s.settled) {
-        const timeStr = formatTime(Date.now());
-        parts.push(`## Tools\n\n- [${timeStr}] → working...`);
+    } else if (!s.settled && s.phase !== "compacting") {
+        const timeStr = formatTime(nowMs);
+        parts.push(`## Tools\n\n- ${timeStr} → working...`);
     }
 
-    // 3. Background Jobs / Child Tasks Dropdown
+    // 3. Background Tasks Dropdown
     if (childWork.length > 0) {
         const formatChild = (c: LiveTailTool) => {
-            const timeStr = formatTime(c.startedAt || Date.now());
+            const timeStr = formatTime(c.startedAt || nowMs);
             const mark = c.state === "running" ? "→" : c.state === "error" ? "❌" : "✓";
-            const dur = typeof c.elapsedMs === "number" && c.elapsedMs >= 50
-                ? ` · ${(c.elapsedMs / 1000).toFixed(1)}s`
+            const liveMs = c.state === "running" && c.startedAt ? nowMs - c.startedAt : c.elapsedMs;
+            const dur = typeof liveMs === "number" && liveMs >= 100
+                ? ` · ${(liveMs / 1000).toFixed(1)}s`
                 : "";
-            return `- [${timeStr}] ${mark} **Subagent**${c.name ? `: *${c.name}*` : ""}${dur}`;
+            return `- ${timeStr} ${mark} **Subagent**${c.name ? `: *${c.name}*` : ""}${dur}`;
         };
         parts.push(
             `<details><summary>👥 <b>Background Tasks (${childWork.length})</b></summary>\n\n` +
@@ -395,7 +405,7 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
         );
     }
 
-    // 4. Status Section (Dynamic Context % and Compaction History)
+    // 4. Status Section (Clean, concise footer: no git branch, no cwd, no live_tail tag)
     let ctxPercent = "0%";
     if (cfg.contextUsage && typeof cfg.contextUsage.percent === "number") {
         ctxPercent = `${Math.round(cfg.contextUsage.percent)}%`;
@@ -409,7 +419,8 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
     }
 
     const compactionStr = typeof cfg.compactionCount === "number" ? `${cfg.compactionCount}x` : "0x";
-    const statusLine = `ctx ${ctxPercent} · compacted ${compactionStr} · ${modelLabel} · git main · ~/.pi/work · live_tail · ${elapsed}`;
+    const phasePrefix = s.phase === "compacting" ? "compacting · " : "";
+    const statusLine = `ctx ${ctxPercent} · ${phasePrefix}compacted ${compactionStr} · ${modelLabel} · ${elapsed}`;
     parts.push(`## Status\n\n${statusLine}`);
 
     return parts.join("\n\n");
