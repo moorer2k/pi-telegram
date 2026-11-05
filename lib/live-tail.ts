@@ -47,24 +47,22 @@ export interface LiveTailSnapshot {
   interruptedTools: number;
 }
 
-const MAX_REASONING = 360;
-const MAX_EARLIER = 600;
+const MAX_REASONING = 1200;
+const MAX_EARLIER = 2400;
 const MAX_PLAN = 400;
-const MAX_TOOLS = 24;
+const MAX_TOOLS = 32;
 const MAX_ACTIVE_TOOLS = 64;
 
-/** Only explicit, bounded display fields are allowed. Suppress likely secrets. */
-function safePreview(value: unknown, max = 160): string | undefined {
+/** Only explicit, bounded display fields are allowed. Suppress actual secrets with [REDACTED]. */
+function safePreview(value: unknown, max = 180): string | undefined {
   if (typeof value !== "string") return undefined;
-  const text = value.replace(/\s+/g, " ").trim();
-  if (/\b(?:[A-Za-z0-9+/]{48,}={0,2}|[A-Fa-f0-9]{64,})\b/.test(text)) return undefined;
-  // Shell previews can include literal values and URLs containing credentials.
-  if (/(?:[a-z][a-z0-9+.-]*:\/\/[^\s/@]+:[^\s/@]+@|(?:^|\s)(?:-p|--password|--token|--secret)(?:=|\s+)|(?:^|\s)[A-Z][A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD)\s*=)/i.test(text)) return undefined;
-  if (/(?:x-api-key|x-auth-token|authorization\s*[:=]|(?:^|\s)--(?:api-key|access-key|client-secret|auth|credential)(?:=|\s+))/i.test(text)) return undefined;
+  let text = value.replace(/\s+/g, " ").trim();
   if (!text) return undefined;
-  const forbidden = ["password", "passwd", "secret", "token", "api_key", "apikey", "authorization", "bearer ", "private_key", "credential", ".env", "--key", "--password", "aws_access_key", "session_key"];
-  if (forbidden.some(word => text.toLowerCase().includes(word))) return undefined;
-  if (/\b(?:gh[pousr]_[A-Za-z0-9_]{12,}|sk-[A-Za-z0-9_-]{12,}|AKIA[0-9A-Z]{16})\b/.test(text)) return undefined;
+  // Redact actual sensitive API keys / tokens instead of dropping the entire command
+  text = text.replace(/\bsk-[A-Za-z0-9_-]{20,}\b/g, "[REDACTED]");
+  text = text.replace(/\bgh[pousr]_[A-Za-z0-9_]{20,}\b/g, "[REDACTED]");
+  text = text.replace(/\bAKIA[0-9A-Z]{16}\b/g, "[REDACTED]");
+  text = text.replace(/(?:key|token|secret|password|passwd|authorization|bearer)\s*[:=]\s*[^\s,;]+/gi, "$1=[REDACTED]");
   return text.slice(0, max);
 }
 
@@ -76,6 +74,12 @@ function toolCommand(name: string, args: unknown): string | undefined {
   for (const key of keys) {
     const value = safePreview(data[key], 180);
     if (value) return value;
+  }
+  for (const v of Object.values(data)) {
+    if (typeof v === "string" && v.trim()) {
+      const value = safePreview(v, 180);
+      if (value) return value;
+    }
   }
   return undefined;
 }
@@ -334,20 +338,6 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
         .join("\n\n")
         .trim();
 
-    const formatToolLine = (t: LiveTailTool): string => {
-        const timeStr = formatTime(t.startedAt || nowMs);
-        const mark = t.state === "running" ? "→" : t.state === "error" ? "❌" : "✓";
-        const liveMs = t.state === "running" && t.startedAt ? nowMs - t.startedAt : t.elapsedMs;
-        const dur = typeof liveMs === "number" && liveMs >= 100
-            ? ` · ${(liveMs / 1000).toFixed(1)}s`
-            : "";
-        const statusText = t.state === "running" ? ` · running${dur}` : ` · done${dur}`;
-        const target = formatToolTarget(t.name, t.command ?? t.update ?? "");
-        const targetText = target ? `: ${target}` : "";
-        // Exact single bracket formatting: - [HH:MM] ✓ tool: command ...
-        return `- ${timeStr} ${mark} ${t.name}${targetText}${statusText}`;
-    };
-
     const parts: string[] = [];
 
     // If compacting is in progress, make it front and center
@@ -355,29 +345,72 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
         parts.push("## Compacting Session\n\n🗜 *Summarizing conversation history to preserve context space...*");
     }
 
-    // 1. Reasoning Section (Large heading '## Reasoning')
+    // 1. Reasoning Section - FIRST THING THAT SHOWS
     if (cfg.reasoning !== "hidden" && combinedReasoning && s.phase !== "compacting") {
-        const reasoningTail = combinedReasoning.length > 1200 ? combinedReasoning.slice(-1200) : combinedReasoning;
-        if (tools.length > 0) {
-            parts.push(`<details><summary>🧠 <b>Reasoning History</b></summary>\n\n${reasoningTail}\n</details>`);
+        if (combinedReasoning.length <= 450) {
+            parts.push(`## Reasoning\n\n${combinedReasoning}`);
         } else {
-            parts.push(`## Reasoning\n\n${reasoningTail}`);
+            parts.push(`<details><summary>🧠 <b>Reasoning (tap to expand)</b></summary>\n\n${combinedReasoning}\n</details>`);
         }
     }
 
-    // 2. Tools Section (Large heading '## Tools')
+    // 2. Tools Section with consecutive execution collapsing (x1, x2, x3)
     if (cfg.tools !== "hidden" && tools.length > 0) {
-        const MAX_RECENT = 4;
-        const visibleTools = tools.slice(-MAX_RECENT);
-        const olderTools = tools.slice(0, -MAX_RECENT);
+        interface GroupedToolRow {
+            name: string;
+            target: string;
+            timeStr: string;
+            mark: string;
+            state: string;
+            count: number;
+            totalMs: number;
+        }
 
-        const visibleLines = visibleTools.map(formatToolLine);
+        const groupedTools: GroupedToolRow[] = [];
+        for (const t of tools) {
+            const timeStr = formatTime(t.startedAt || nowMs);
+            const mark = t.state === "running" ? "→" : t.state === "error" ? "❌" : "✓";
+            const liveMs = t.state === "running" && t.startedAt ? nowMs - t.startedAt : (t.elapsedMs ?? 0);
+            const target = formatToolTarget(t.name, t.command ?? t.update ?? "");
+
+            const last = groupedTools[groupedTools.length - 1];
+            if (last && last.name === t.name && last.target === target && last.state === t.state) {
+                last.count += 1;
+                last.totalMs += liveMs;
+                last.timeStr = timeStr;
+            } else {
+                groupedTools.push({
+                    name: t.name,
+                    target,
+                    timeStr,
+                    mark,
+                    state: t.state,
+                    count: 1,
+                    totalMs: liveMs,
+                });
+            }
+        }
+
+        const formatGroupedToolLine = (r: GroupedToolRow): string => {
+            const countText = r.count > 1 ? ` ×${r.count}` : "";
+            const dur = r.totalMs >= 100 ? ` · ${(r.totalMs / 1000).toFixed(1)}s` : "";
+            const statusText = r.state === "running" ? ` · running${dur}` : ` · done${dur}`;
+            const targetText = r.target ? `: ${r.target}` : "";
+            return `- ${r.timeStr} ${r.mark} ${r.name}${targetText}${countText}${statusText}`;
+        };
+
+        const MAX_RECENT = 4;
+        const visibleTools = groupedTools.slice(-MAX_RECENT);
+        const olderTools = groupedTools.slice(0, -MAX_RECENT);
+
+        const visibleLines = visibleTools.map(formatGroupedToolLine);
         parts.push(`## Tools\n\n${visibleLines.join("\n")}`);
 
         if (olderTools.length > 0) {
-            const olderLines = olderTools.map(formatToolLine);
+            const olderLines = olderTools.map(formatGroupedToolLine);
+            const totalOlderCalls = olderTools.reduce((acc, curr) => acc + curr.count, 0);
             parts.push(
-                `<details><summary>📁 <b>Earlier Tools (${olderTools.length} completed)</b></summary>\n\n` +
+                `<details><summary>📁 <b>Earlier Tools (${totalOlderCalls} calls)</b></summary>\n\n` +
                 olderLines.join("\n") +
                 "\n</details>"
             );
@@ -405,7 +438,7 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
         );
     }
 
-    // 4. Status Section (Clean, concise footer: no git branch, no cwd, no live_tail tag)
+    // 4. Status Section (Clean, concise footer)
     let ctxPercent = "0%";
     if (cfg.contextUsage && typeof cfg.contextUsage.percent === "number") {
         ctxPercent = `${Math.round(cfg.contextUsage.percent)}%`;
