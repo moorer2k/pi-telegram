@@ -3120,11 +3120,26 @@ export default function (pi: Pi.ExtensionAPI) {
     },
     onSessionStarted(_event, ctx) {
       liveTailConsumer?.dispose();
-      liveTailConsumer = registerLiveTailConsumer(() => ({
-        ...configControls.getLiveTailSettings(),
-        enabled: configControls.getLiveTailSettings().enabled === true || process.env.PI_TELEGRAM_LIVE_TAIL === "1",
-        model: currentModelRuntime.getStored()?.id ?? currentModelRuntime.getStored()?.name ?? "rvn-q4-km-mtp",
-      } as any));
+      liveTailConsumer = registerLiveTailConsumer(() => {
+        const usage = (ctx as any).getContextUsage?.();
+        const branch = (ctx as any).sessionManager?.getBranch?.() ?? [];
+        const compactions = Array.isArray(branch)
+          ? branch.filter((e: any) => e.type === "compaction").length
+          : 0;
+        return {
+          ...configControls.getLiveTailSettings(),
+          enabled:
+            configControls.getLiveTailSettings().enabled === true ||
+            process.env.PI_TELEGRAM_LIVE_TAIL === "1",
+          model:
+            currentModelRuntime.getStored()?.id ??
+            currentModelRuntime.getStored()?.name ??
+            "rvn-q4-km-mtp",
+          contextUsage: usage,
+          compactionCount: compactions,
+          cwd: (ctx as any).cwd,
+        } as any;
+      });
       sessionActionAssembly.settlement.onSessionStart(ctx);
       void deliverRestartNotice(sendMessage);
     },

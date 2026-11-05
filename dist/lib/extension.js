@@ -2540,11 +2540,24 @@ export default function (pi) {
         },
         onSessionStarted(_event, ctx) {
             liveTailConsumer?.dispose();
-            liveTailConsumer = registerLiveTailConsumer(() => ({
-                ...configControls.getLiveTailSettings(),
-                enabled: configControls.getLiveTailSettings().enabled === true || process.env.PI_TELEGRAM_LIVE_TAIL === "1",
-                model: currentModelRuntime.getStored()?.id ?? currentModelRuntime.getStored()?.name ?? "rvn-q4-km-mtp",
-            }));
+            liveTailConsumer = registerLiveTailConsumer(() => {
+                const usage = ctx.getContextUsage?.();
+                const branch = ctx.sessionManager?.getBranch?.() ?? [];
+                const compactions = Array.isArray(branch)
+                    ? branch.filter((e) => e.type === "compaction").length
+                    : 0;
+                return {
+                    ...configControls.getLiveTailSettings(),
+                    enabled: configControls.getLiveTailSettings().enabled === true ||
+                        process.env.PI_TELEGRAM_LIVE_TAIL === "1",
+                    model: currentModelRuntime.getStored()?.id ??
+                        currentModelRuntime.getStored()?.name ??
+                        "rvn-q4-km-mtp",
+                    contextUsage: usage,
+                    compactionCount: compactions,
+                    cwd: ctx.cwd,
+                };
+            });
             sessionActionAssembly.settlement.onSessionStart(ctx);
             void deliverRestartNotice(sendMessage);
         },

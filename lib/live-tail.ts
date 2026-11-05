@@ -319,6 +319,7 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
     };
 
     const tools: LiveTailTool[] = Array.isArray(s.tools) ? s.tools : [];
+    const childWork: LiveTailTool[] = Array.isArray(s.childWork) ? s.childWork : [];
 
     const span = Number.isFinite(s.updatedAt - s.startedAt)
         ? Math.max(0, Math.floor((s.updatedAt - s.startedAt) / 1000)) : 0;
@@ -331,43 +332,84 @@ export function renderLiveTail(snapshot: LiveTailSnapshot, settings: TelegramLiv
         .join("\n\n")
         .trim();
 
+    const formatToolLine = (t: LiveTailTool): string => {
+        const timeStr = formatTime(t.startedAt || Date.now());
+        const mark = t.state === "running" ? "→" : t.state === "error" ? "❌" : "✓";
+        const dur = typeof t.elapsedMs === "number" && t.elapsedMs >= 50
+            ? ` · ${(t.elapsedMs / 1000).toFixed(1)}s`
+            : "";
+        const statusText = t.state === "running" ? " · running" : ` · done${dur}`;
+        const target = formatToolTarget(t.name, t.command ?? t.update ?? "");
+        const targetText = target ? `: ${target}` : "";
+        return `- [${timeStr}] ${mark} ${t.name}${targetText}${statusText}`;
+    };
+
     const parts: string[] = [];
 
     // 1. Reasoning Section (Large heading '## Reasoning')
     if (cfg.reasoning !== "hidden" && combinedReasoning) {
-        const reasoningTail = combinedReasoning.length > 900 ? combinedReasoning.slice(-900) : combinedReasoning;
-        parts.push(`## Reasoning\n\n${reasoningTail}`);
+        const reasoningTail = combinedReasoning.length > 1200 ? combinedReasoning.slice(-1200) : combinedReasoning;
+        if (tools.length > 0) {
+            parts.push(`<details><summary>🧠 <b>Reasoning History</b></summary>\n\n${reasoningTail}\n</details>`);
+        } else {
+            parts.push(`## Reasoning\n\n${reasoningTail}`);
+        }
     }
 
-    // 2. Tools Section (Large heading '## Tools', bullet lines matching Hermes)
+    // 2. Tools Section (Large heading '## Tools')
     if (cfg.tools !== "hidden" && tools.length > 0) {
-        const lines: string[] = [];
-        const MAX_TOOLS = 6;
-        const visibleTools = tools.slice(-MAX_TOOLS);
+        const MAX_RECENT = 4;
+        const visibleTools = tools.slice(-MAX_RECENT);
+        const olderTools = tools.slice(0, -MAX_RECENT);
 
-        for (const t of visibleTools) {
-            const timeStr = formatTime(t.startedAt || Date.now());
-            const mark = t.state === "running" ? "→" : t.state === "error" ? "❌" : "✓";
-            const dur = typeof t.elapsedMs === "number" && t.elapsedMs >= 50
-                ? ` · ${(t.elapsedMs / 1000).toFixed(1)}s`
-                : "";
-            const statusText = t.state === "running" ? " · running" : ` · done${dur}`;
-            const target = formatToolTarget(t.name, t.command ?? t.update ?? "");
-            const targetText = target ? `: ${target}` : "";
-            lines.push(`- • ${timeStr} ${mark} ${t.name}${targetText}${statusText}`);
-        }
+        const visibleLines = visibleTools.map(formatToolLine);
+        parts.push(`## Tools\n\n${visibleLines.join("\n")}`);
 
-        if (lines.length > 0) {
-            parts.push(`## Tools\n\n${lines.join("\n")}`);
+        if (olderTools.length > 0) {
+            const olderLines = olderTools.map(formatToolLine);
+            parts.push(
+                `<details><summary>📁 <b>Earlier Tools (${olderTools.length} completed)</b></summary>\n\n` +
+                olderLines.join("\n") +
+                "\n</details>"
+            );
         }
     } else if (!s.settled) {
         const timeStr = formatTime(Date.now());
-        parts.push(`## Tools\n\n- • ${timeStr} → working...`);
+        parts.push(`## Tools\n\n- [${timeStr}] → working...`);
     }
 
-    // 3. Status Section (Large heading '## Status', exact Hermes footer format)
-    const ctxLabel = "ctx 2%";
-    const statusLine = `${ctxLabel} · compacted 0x · ${modelLabel} · git main · ~/.pi/work · live_tail · ${elapsed}`;
+    // 3. Background Jobs / Child Tasks Dropdown
+    if (childWork.length > 0) {
+        const formatChild = (c: LiveTailTool) => {
+            const timeStr = formatTime(c.startedAt || Date.now());
+            const mark = c.state === "running" ? "→" : c.state === "error" ? "❌" : "✓";
+            const dur = typeof c.elapsedMs === "number" && c.elapsedMs >= 50
+                ? ` · ${(c.elapsedMs / 1000).toFixed(1)}s`
+                : "";
+            return `- [${timeStr}] ${mark} **Subagent**${c.name ? `: *${c.name}*` : ""}${dur}`;
+        };
+        parts.push(
+            `<details><summary>👥 <b>Background Tasks (${childWork.length})</b></summary>\n\n` +
+            childWork.map(formatChild).join("\n") +
+            "\n</details>"
+        );
+    }
+
+    // 4. Status Section (Dynamic Context % and Compaction History)
+    let ctxPercent = "0%";
+    if (cfg.contextUsage && typeof cfg.contextUsage.percent === "number") {
+        ctxPercent = `${Math.round(cfg.contextUsage.percent)}%`;
+    } else if (cfg.contextUsage && typeof cfg.contextUsage.tokens === "number" && cfg.contextUsage.contextWindow) {
+        const pct = Math.round((cfg.contextUsage.tokens / cfg.contextUsage.contextWindow) * 100);
+        ctxPercent = `${pct}%`;
+    } else if (tools.length > 0 || combinedReasoning.length > 0) {
+        const estTokens = 1200 + tools.length * 450 + Math.floor(combinedReasoning.length / 4);
+        const estPct = Math.min(99, Math.max(1, Math.round((estTokens / 98304) * 100)));
+        ctxPercent = `${estPct}%`;
+    }
+
+    const compactionStr = typeof cfg.compactionCount === "number" ? `${cfg.compactionCount}x` : "0x";
+    const statusLine = `ctx ${ctxPercent} · compacted ${compactionStr} · ${modelLabel} · git main · ~/.pi/work · live_tail · ${elapsed}`;
     parts.push(`## Status\n\n${statusLine}`);
 
     return parts.join("\n\n");
