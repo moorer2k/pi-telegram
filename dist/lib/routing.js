@@ -19,6 +19,7 @@ import * as Replies from "./replies.js";
 import * as TelegramApi from "./telegram-api.js";
 import * as TextGroups from "./text-groups.js";
 import * as ThreadNaming from "./thread-naming.js";
+import { shouldHandleTelegramMessage } from "./group-mention.js";
 import * as ThreadReconciler from "./thread-reconciler.js";
 import * as Turns from "./turns.js";
 import * as WorkspaceIdentity from "./workspace-identity.js";
@@ -7877,7 +7878,20 @@ export function createTelegramInboundRouteRuntime(deps) {
         assertExecutionCurrent(message) {
             Updates.assertTelegramUpdateExecutionCurrent(message);
         },
-        shouldIgnoreMessages: (messages) => !Media.hasTelegramMessagesPromptContent(messages),
+        shouldIgnoreMessages: (messages) => {
+            if (!Media.hasTelegramMessagesPromptContent(messages))
+                return true;
+            const first = messages[0];
+            if (first) {
+                const cfg = deps.configStore.get();
+                const botUsername = cfg.botUsername ?? "pi3090_bot";
+                const botId = cfg.botId ?? (cfg.botToken ? Number(cfg.botToken.split(":")[0]) : undefined);
+                if (!shouldHandleTelegramMessage(first, botUsername, botId)) {
+                    return true;
+                }
+            }
+            return false;
+        },
         consumeThreadNameInput: async (messages) => {
             const message = messages[0];
             if (!message || messages.length !== 1)

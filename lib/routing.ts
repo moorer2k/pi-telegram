@@ -33,6 +33,7 @@ import type {
 import * as TelegramApi from "./telegram-api.ts";
 import * as TextGroups from "./text-groups.ts";
 import * as ThreadNaming from "./thread-naming.ts";
+import { shouldHandleTelegramMessage } from "./group-mention.ts";
 import * as ThreadReconciler from "./thread-reconciler.ts";
 import type {
   TelegramInstanceThreadIdentityCandidate,
@@ -11227,8 +11228,19 @@ export function createTelegramInboundRouteRuntime<
       assertExecutionCurrent(message) {
         Updates.assertTelegramUpdateExecutionCurrent(message);
       },
-      shouldIgnoreMessages: (messages) =>
-        !Media.hasTelegramMessagesPromptContent(messages),
+      shouldIgnoreMessages: (messages) => {
+        if (!Media.hasTelegramMessagesPromptContent(messages)) return true;
+        const first = messages[0];
+        if (first) {
+          const cfg = deps.configStore.get();
+          const botUsername = cfg.botUsername ?? "pi3090_bot";
+          const botId = cfg.botId ?? (cfg.botToken ? Number(cfg.botToken.split(":")[0]) : undefined);
+          if (!shouldHandleTelegramMessage(first as any, botUsername, botId)) {
+            return true;
+          }
+        }
+        return false;
+      },
       consumeThreadNameInput: async (messages) => {
         const message = messages[0];
         if (!message || messages.length !== 1) return false;
